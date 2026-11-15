@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="CareMesh — elder-first care coordination for medications, appointments and trusted care circles." />
+  <title>CareMesh — Care, connected.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="grid-overlay" aria-hidden="true"></div>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">CM</span>
+        <div>
+          <div class="eyebrow">CAREMESH / CATALYST</div>
+          <div class="brand-name">CareMesh</div>
+        </div>
+      </div>
+      <div class="top-meta">
+        <span id="system-status" class="status-dot"><i></i> SYSTEM READY</span>
+        <button id="logout-btn" class="pill subtle hidden">Sign out ↗</button>
+      </div>
+    </header>
+
+    <main id="main" class="main"></main>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
