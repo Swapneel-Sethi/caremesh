@@ -33,15 +33,24 @@ export async function generateCareBrief(snapshot) {
   return body?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n')?.trim() || deterministicCareBrief(snapshot);
 }
 
+function timeLabel(value) {
+  const [hours, minutes] = String(value).split(':').map(Number);
+  const suffix = hours >= 12 ? 'pm' : 'am';
+  const hour = hours % 12 || 12;
+  return `${hour}:${String(minutes || 0).padStart(2, '0')} ${suffix}`;
+}
+
 function deterministicCareBrief(snapshot) {
   const pending = snapshot.medications.filter((med) => med.status === 'pending');
   const missed = snapshot.medications.filter((med) => med.status === 'missed');
-  const nextAppointment = [...snapshot.appointments].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0];
+  const nextAppointment = [...snapshot.appointments]
+    .filter((appointment) => new Date(`${appointment.date}T${appointment.time}`) >= new Date())
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0];
   const lines = [
     `TODAY\n${snapshot.medications.length - pending.length} of ${snapshot.medications.length} scheduled medications confirmed.`,
-    pending.length ? `PENDING\n${pending.map((med) => `${med.name} at ${med.schedule}`).join('; ')}` : 'PENDING\nNo pending medication confirmations.',
+    pending.length ? `PENDING\n${pending.map((med) => `${med.name} at ${timeLabel(med.schedule)}`).join('; ')}` : 'PENDING\nNo pending medication confirmations.',
     missed.length ? `ATTENTION\n${missed.length} medication item${missed.length === 1 ? '' : 's'} marked missed.` : 'ATTENTION\nNo missed medication events recorded.',
-    nextAppointment ? `NEXT\n${nextAppointment.doctor} · ${nextAppointment.specialty} · ${nextAppointment.time}` : 'NEXT\nNo upcoming appointments found.',
+    nextAppointment ? `NEXT\n${nextAppointment.doctor} · ${nextAppointment.specialty} · ${timeLabel(nextAppointment.time)}` : 'NEXT\nNo upcoming appointments found.',
     'ACTION\nCheck the evening routine and keep the designated caregiver informed of any missed dose.'
   ];
   return lines.join('\n\n');
