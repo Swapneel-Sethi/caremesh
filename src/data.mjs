@@ -25,7 +25,7 @@ const state = {
     { id: 'appt-2', doctor: 'Dr. Vivek Shah', specialty: 'Physiotherapy', date: '2026-11-18', time: '11:00', location: 'CareWell Rehab', status: 'upcoming', notes: 'Bring walking assessment.' }
   ],
   careTeam: [
-    { id: 'team-1', name: 'Priya Shah', role: 'Caregiver', access: 'medications + appointments', avatar: 'PS' },
+    { id: 'team-1', name: 'Priya Shah', role: 'Caregiver', access: 'medications + appointments + alerts', avatar: 'PS' },
     { id: 'team-2', name: 'Arjun Rao', role: 'Family', access: 'view + alerts', avatar: 'AR' }
   ],
   events: [
@@ -33,7 +33,8 @@ const state = {
     { id: crypto.randomUUID(), at: '08:40', title: 'Appointment reminder queued', actor: 'CarePulse', type: 'reminder', detail: 'Cardiology · 16:30' },
     { id: crypto.randomUUID(), at: 'Yesterday', title: 'Caregiver access reviewed', actor: 'Meera Rao', type: 'security', detail: 'Priya Shah' }
   ],
-  outbox: []
+  outbox: [],
+  reminders: []
 };
 
 export function getState() { return state; }

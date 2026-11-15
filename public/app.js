@@ -292,6 +292,7 @@ function careCircleCard() {
 function carePeople() {
   const accessCopy = {
     'medications + appointments': 'Helps with medications and appointments',
+    'medications + appointments + alerts': 'Helps with medications, appointments and alerts',
     'view + alerts': 'Can view care details and receive alerts'
   };
   return [
@@ -338,7 +339,7 @@ function medicationsView() {
         ${editable ? `<div class="button-row">
           <button class="button button-secondary" id="add-med-btn">Add medication</button>
           <button class="button button-secondary" id="run-reminders-btn">Send reminders</button>
-        </div><p class="helper">Send reminders asks your care circle to check anything not yet taken.</p>` : `<p class="read-only">Family access is read-only. The elder and caregiver manage medications.</p>`}
+        </div><p class="helper">Send reminders checks due medications and upcoming appointments, then emails your care circle.</p>` : `<p class="read-only">Family access is read-only. The elder and caregiver manage medications.</p>`}
       </section>
     </div>`;
 }
@@ -445,7 +446,15 @@ function bindInteractions() {
     try {
       const result = await api('/api/reminders/run', { method: 'POST', body: '{}' });
       await loadDashboard();
-      toast(result.results.length ? `Reminder sent for ${result.results.length} medication${result.results.length === 1 ? '' : 's'}.` : 'No medications are waiting for a reminder.');
+      const sent = result.results.filter((item) => item.status === 'sent').length;
+      const preview = result.results.filter((item) => item.status === 'preview').length;
+      const failed = result.results.filter((item) => item.status === 'failed' || item.status === 'unconfigured').length;
+      const duplicates = result.results.filter((item) => item.status === 'duplicate').length;
+      if (sent) toast(`${sent} reminder${sent === 1 ? '' : 's'} sent to your care circle.`);
+      else if (preview) toast(`${preview} reminder${preview === 1 ? '' : 's'} prepared in preview mode.`);
+      else if (duplicates) toast('Those reminders were already sent. No duplicates were created.');
+      else if (failed) toast('The reminder could not be sent. Please try again.', true);
+      else toast('No reminders are due right now.');
     } catch (error) {
       button.disabled = false;
       button.textContent = 'Send reminders';

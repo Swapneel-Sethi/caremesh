@@ -122,10 +122,29 @@ export async function persistOutbox(message) {
   if (!useFirestore) {
     const state = memoryState();
     state.outbox.unshift(message);
+    state.outbox = state.outbox.slice(0, 50);
     return message;
   }
   await upsert('outbox', message.id, message);
   return message;
+}
+
+export async function reminderKeys() {
+  if (!useFirestore) return new Set((memoryState().reminders || []).map((record) => record.key));
+  const records = await listCollection('reminders');
+  return new Set(records.map((record) => record.key));
+}
+
+export async function persistReminder(record) {
+  if (!useFirestore) {
+    const state = memoryState();
+    state.reminders.unshift(record);
+    state.reminders = state.reminders.slice(0, 200);
+    return record;
+  }
+  const id = crypto.createHash('sha256').update(record.key).digest('hex');
+  await upsert('reminders', id, record);
+  return record;
 }
 
 export function persistenceMode() { return useFirestore ? 'firestore' : 'demo-memory'; }

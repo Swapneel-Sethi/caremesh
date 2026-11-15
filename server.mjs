@@ -1,4 +1,5 @@
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,15 +8,18 @@ import { getUsers, getUserById } from './src/data.mjs';
 import { createSession, readSession, verifyPasscode } from './src/security.mjs';
 import { validateMedication, validateAppointment } from './src/validation.mjs';
 import { generateCareBrief } from './src/google.mjs';
-import { sendReminder } from './src/email.mjs';
+import { previewReminders, runReminders } from './src/reminders.mjs';
 import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdate, persistAppointment, persistenceMode } from './src/store.mjs';
 
 const publicDir = path.resolve('public');
-const sessions = new Map();
 const limiter = new Map();
 
+function cookieFlags() {
+  return `HttpOnly; Path=/; SameSite=Lax${config.nodeEnv === 'production' ? '; Secure' : ''}`;
+}
+
 function setCookie(value) {
-  return `caremesh_session=${value}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${8 * 60 * 60}${config.nodeEnv === 'production' ? '; Secure' : ''}`;
+  return `caremesh_session=${value}; ${cookieFlags()}; Max-Age=${8 * 60 * 60}`;
 }
 
 function readCookie(req) {
@@ -34,12 +38,20 @@ function bad(res, message, status = 400) { json(res, status, { error: message })
 
 async function body(req) {
   const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 200_000) throw new Error('Payload too large');
     chunks.push(chunk);
-    if (Buffer.concat(chunks).length > 200_000) throw new Error('Payload too large');
   }
   if (!chunks.length) return {};
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new Error('Invalid JSON'); }
+}
+
+async function readObject(req) {
+  const input = await body(req);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Request body must be a JSON object');
+  return input;
 }
 
 function authUser(req) {
@@ -59,8 +71,13 @@ function requireRoles(user, res, roles) {
   return true;
 }
 
+function clientIp(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwarded || req.socket.remoteAddress || 'unknown';
+}
+
 function rateLimited(req) {
-  const ip = req.socket.remoteAddress || 'unknown';
+  const ip = clientIp(req);
   const now = Date.now();
   const record = limiter.get(ip) || { count: 0, reset: now + 60_000 };
   if (now > record.reset) { record.count = 0; record.reset = now + 60_000; }
@@ -69,24 +86,60 @@ function rateLimited(req) {
   return record.count > 60;
 }
 
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  if (!a.length || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function safeOutbox(outbox) {
+  return (outbox || []).slice(0, 10).map(({ id, kind, subject, status, sentAt, providerStatus }) => ({ id, kind, subject, status, sentAt, providerStatus }));
+}
+
 async function api(req, res, url) {
-  if (rateLimited(req)) return bad(res, 'Too many requests', 429);
   const method = req.method || 'GET';
   const route = url.pathname;
 
-  if (method === 'GET' && route === '/api/health') return json(res, 200, { ok: true, service: 'caremesh', uptime: process.uptime(), time: new Date().toISOString(), persistence: persistenceMode(), ai: config.googleProject ? 'vertex-ai' : 'deterministic-fallback', email: config.resendApiKey ? 'resend' : 'preview-outbox' });
+  if (method === 'GET' && route === '/api/health') {
+    return json(res, 200, {
+      ok: true,
+      service: 'caremesh',
+      uptime: process.uptime(),
+      time: new Date().toISOString(),
+      persistence: persistenceMode(),
+      ai: config.googleProject ? 'vertex-ai' : 'deterministic-fallback',
+      email: config.resendApiKey ? 'resend' : 'preview-outbox',
+      cron: config.cronSecret ? 'configured' : 'unconfigured',
+      reminders: config.careTeamAlertEmails.length ? 'configured' : 'unconfigured'
+    });
+  }
+
+  if ((method === 'GET' || method === 'POST') && route === '/api/cron/reminders') {
+    if (!config.cronSecret) return bad(res, 'Scheduled reminders are not configured', 503);
+    const header = String(req.headers.authorization || '');
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!safeEqual(token, config.cronSecret)) return bad(res, 'Unauthorized', 401);
+    const result = await runReminders({ actor: 'CarePulse schedule' });
+    return json(res, 200, { ok: true, ...result });
+  }
+
+  if (rateLimited(req)) return bad(res, 'Too many requests', 429);
 
   if (method === 'POST' && route === '/api/auth/login') {
-    const input = await body(req);
+    let input;
+    try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
+    if (typeof input.role !== 'string' || typeof input.passcode !== 'string') return bad(res, 'Role and access code are required', 400);
     const user = getUsers().find((item) => item.role === input.role);
-    if (!user || typeof input.passcode !== 'string' || !verifyPasscode(input.passcode, user.salt, user.hash)) return bad(res, 'Invalid access code', 401);
+    if (!user || !verifyPasscode(input.passcode, user.salt, user.hash)) return bad(res, 'Invalid access code', 401);
     const sessionToken = createSession(user.id, config.sessionSecret);
-    sessions.set(user.id, sessionToken);
     await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Secure access session created', actor: user.name, type: 'security', detail: `${user.role} portal` });
     return json(res, 200, { user: sanitizeUser(user) }, { 'Set-Cookie': setCookie(sessionToken) });
   }
 
-  if (method === 'POST' && route === '/api/auth/logout') return json(res, 200, { ok: true }, { 'Set-Cookie': 'caremesh_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0' });
+  if (method === 'POST' && route === '/api/auth/logout') {
+    return json(res, 200, { ok: true }, { 'Set-Cookie': `caremesh_session=; ${cookieFlags()}; Max-Age=0` });
+  }
 
   const user = requireAuth(req, res);
   if (!user) return;
@@ -97,12 +150,13 @@ async function api(req, res, url) {
     const state = await domainSnapshot();
     let careBrief = 'Care Brief unavailable.';
     try { careBrief = await generateCareBrief({ profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam }); } catch (error) { careBrief = `Care Brief fallback\n\n${error.message}`; }
-    return json(res, 200, { user: sanitizeUser(user), profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam, events: state.events, outbox: state.outbox.slice(0, 10), careBrief });
+    return json(res, 200, { user: sanitizeUser(user), profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam, events: state.events, outbox: safeOutbox(state.outbox), careBrief });
   }
 
   if (method === 'POST' && route === '/api/medications') {
     if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
-    const input = validateMedication(await body(req));
+    let input;
+    try { input = validateMedication(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
     const med = await persistMedication(input);
     await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Medication schedule created', actor: user.name, type: 'medication', detail: med.name });
     return json(res, 201, { medication: med });
@@ -111,10 +165,12 @@ async function api(req, res, url) {
   const medMatch = route.match(/^\/api\/medications\/([^/]+)$/);
   if (method === 'PATCH' && medMatch) {
     if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
-    const input = await body(req);
+    let input;
+    try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
     const allowed = {};
     if (['pending', 'taken', 'missed'].includes(input.status)) allowed.status = input.status;
-    if (input.instructions) allowed.instructions = String(input.instructions).slice(0, 220);
+    if (typeof input.instructions === 'string' && input.instructions.trim()) allowed.instructions = input.instructions.trim().slice(0, 220);
+    if (!Object.keys(allowed).length) return bad(res, 'No valid medication update provided', 400);
     const med = await persistMedicationUpdate(medMatch[1], allowed);
     if (!med) return bad(res, 'Medication not found', 404);
     await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: `Medication marked ${med.status}`, actor: user.name, type: 'medication', detail: med.name });
@@ -123,26 +179,23 @@ async function api(req, res, url) {
 
   if (method === 'POST' && route === '/api/appointments') {
     if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
-    const input = validateAppointment(await body(req));
+    let input;
+    try { input = validateAppointment(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
     const appointment = await persistAppointment(input);
     await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Appointment added', actor: user.name, type: 'appointment', detail: `${appointment.doctor} · ${appointment.date}` });
     return json(res, 201, { appointment });
   }
 
+  if (method === 'POST' && route === '/api/reminders/preview') {
+    if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
+    const candidates = await previewReminders();
+    return json(res, 200, { candidates, checkedAt: new Date().toISOString(), timeZone: config.reminderTimeZone });
+  }
+
   if (method === 'POST' && route === '/api/reminders/run') {
-    const state = await domainSnapshot();
-    const pending = state.medications.filter((med) => med.status === 'pending').slice(0, 3);
-    const results = [];
-    for (const medication of pending) {
-      const emailResult = await sendReminder({
-        to: 'careteam.demo@example.com',
-        subject: `CareMesh reminder · ${medication.name}`,
-        text: `Reminder: ${medication.name} is scheduled for ${medication.schedule}. Please confirm the dose or follow the care plan.`
-      });
-      results.push({ medicationId: medication.id, ...emailResult });
-    }
-    await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Reminder dispatch checked', actor: 'CarePulse', type: 'reminder', detail: `${results.length} pending medication${results.length === 1 ? '' : 's'}` });
-    return json(res, 200, { results });
+    if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
+    const result = await runReminders({ actor: user.name });
+    return json(res, 200, result);
   }
 
   if (method === 'POST' && route === '/api/care-brief') {

@@ -1,5 +1,9 @@
 {
   "functions": {
-    "server.mjs": { "includeFiles": "public/**" }
-  }
+    "server.mjs": { "includeFiles": "public/**", "maxDuration": 30 }
+  },
+  "crons": [
+    { "path": "/api/cron/reminders", "schedule": "30 2 * * *" },
+    { "path": "/api/cron/reminders", "schedule": "30 14 * * *" }
+  ]
 }
