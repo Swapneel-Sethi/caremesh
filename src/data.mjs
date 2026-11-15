@@ -18,7 +18,7 @@ const state = {
   medications: [
     { id: 'med-1', name: 'Metformin 500 mg', schedule: '08:00', frequency: 'Daily', status: 'taken', ownerId: 'profile-elder', nextDue: 'Today · 08:00', instructions: 'Take with breakfast.', category: 'Routine' },
     { id: 'med-2', name: 'Amlodipine 5 mg', schedule: '13:00', frequency: 'Daily', status: 'taken', ownerId: 'profile-elder', nextDue: 'Today · 13:00', instructions: 'Take after lunch.', category: 'Routine' },
-    { id: 'med-3', name: 'Vitamin D3', schedule: '20:00', frequency: 'Daily', status: 'pending', ownerId: 'profile-elder', nextDue: 'Today · 20:00', instructions: 'Take after dinner.', category: 'Routine' }
+    { id: 'med-3', name: 'Vitamin D3 1000 IU', schedule: '20:00', frequency: 'Daily', status: 'pending', ownerId: 'profile-elder', nextDue: 'Today · 20:00', instructions: 'Take after dinner.', category: 'Routine' }
   ],
   appointments: [
     { id: 'appt-1', doctor: 'Dr. Ananya Mehta', specialty: 'Cardiology', date: '2026-11-15', time: '16:30', location: 'Apollo Clinic · Bandra', status: 'confirmed', notes: 'Carry previous prescription.' },

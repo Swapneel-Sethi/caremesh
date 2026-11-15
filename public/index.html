@@ -3,32 +3,48 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="description" content="CareMesh — elder-first care coordination for medications, appointments and trusted care circles." />
-  <title>CareMesh — Care, connected.</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <meta name="theme-color" content="#00843D" />
+  <meta name="description" content="CareMesh is an elder-first care space for medications, appointments and a trusted care circle." />
+  <title>CareMesh — Elder-first care coordination</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2300843D'/%3E%3Ctext x='32' y='43' font-family='Arial' font-size='26' font-weight='700' text-anchor='middle' fill='white'%3ECM%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="grid-overlay" aria-hidden="true"></div>
-  <div id="app" class="app-shell">
-    <header class="topbar">
-      <div class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true">CM</span>
-        <div>
-          <div class="eyebrow">CAREMESH / CATALYST</div>
-          <div class="brand-name">CareMesh</div>
-        </div>
-      </div>
-      <div class="top-meta">
-        <span id="system-status" class="status-dot"><i></i> SYSTEM READY</span>
-        <button id="logout-btn" class="pill subtle hidden">Sign out ↗</button>
-      </div>
-    </header>
+  <a class="skip-link" href="#main">Skip to main content</a>
 
-    <main id="main" class="main"></main>
-  </div>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/" aria-label="CareMesh home">
+        <span class="brand-mark" aria-hidden="true">CM</span>
+        <span class="brand-name">CareMesh</span>
+      </a>
+      <div class="header-actions">
+        <span id="session-user" class="session-user hidden"></span>
+        <button id="logout-btn" class="header-button hidden" type="button">Sign out</button>
+      </div>
+    </div>
+    <nav id="section-nav" class="section-nav hidden" aria-label="Care sections"></nav>
+  </header>
+
+  <main id="main" class="main" tabindex="-1" aria-busy="true">
+    <section class="page">
+      <div class="card">
+        <p class="lead">Loading your care space…</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p><strong>CareMesh</strong> · Demo with synthetic data only. Not for real medical use.</p>
+    </div>
+  </footer>
+
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>
+  <noscript><p class="main">CareMesh needs JavaScript enabled to sign in.</p></noscript>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
