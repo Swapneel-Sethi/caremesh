@@ -175,7 +175,7 @@ async function staticFile(req, res, url) {
   } catch { bad(res, 'Not found', 404); }
 }
 
-const server = http.createServer(async (req, res) => {
+export async function handler(req, res) {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     if (url.pathname.startsWith('/api/')) return await api(req, res, url);
@@ -185,6 +185,11 @@ const server = http.createServer(async (req, res) => {
     console.error('request_error', error.message);
     return json(res, 500, { error: 'Internal server error' });
   }
-});
+}
 
-server.listen(config.port, '0.0.0.0', () => console.log(`CareMesh listening on :${config.port}`));
+export default handler;
+
+if (!process.env.VERCEL) {
+  const server = http.createServer(handler);
+  server.listen(config.port, '0.0.0.0', () => console.log(`CareMesh listening on :${config.port}`));
+}

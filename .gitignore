@@ -7,3 +7,7 @@ node_modules/
 coverage/
 data/runtime.json
 caremesh/
+.vercel
+
+.vercel
+.env*
