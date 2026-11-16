@@ -23,10 +23,12 @@ function reminderDocId(key) {
 }
 
 async function ensureDemoRecipient(db, recipientId) {
-  const ref = db.collection('careRecipients').doc(recipientId);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    await ref.set({
+  if (recipientId !== DEMO_RECIPIENT_ID) return;
+
+  const recipientRef = db.collection('careRecipients').doc(recipientId);
+  const recipientSnap = await recipientRef.get();
+  if (!recipientSnap.exists) {
+    await recipientRef.set({
       displayName: 'Meera Rao',
       preferredName: 'Meera',
       timezone: 'Asia/Kolkata',
@@ -35,6 +37,38 @@ async function ensureDemoRecipient(db, recipientId) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
+  }
+
+  const state = memoryState();
+
+  const seedMissing = async (collection, id, data) => {
+    const snap = await db.collection(recipientCollectionPath(recipientId, collection)).doc(id).get();
+    if (!snap.exists) {
+      await db.collection(recipientCollectionPath(recipientId, collection)).doc(id).set(data);
+    }
+  };
+
+  for (const profile of state.profiles) {
+    await seedMissing('profiles', profile.id, profile);
+  }
+
+  for (const medication of state.medications) {
+    await seedMissing('medications', medication.id, medication);
+  }
+
+  for (const appointment of state.appointments) {
+    await seedMissing('appointments', appointment.id, appointment);
+  }
+
+  for (const member of state.careTeam) {
+    await seedMissing('careTeam', member.id, member);
+  }
+
+  const eventsSnap = await db.collection(recipientCollectionPath(recipientId, 'events')).limit(1).get();
+  if (eventsSnap.empty) {
+    for (const event of state.events) {
+      await db.collection(recipientCollectionPath(recipientId, 'events')).doc(event.id).set(event);
+    }
   }
 }
 

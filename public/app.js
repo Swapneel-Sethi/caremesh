@@ -1033,7 +1033,8 @@ async function loadDashboard() {
     dashboard = await api('/api/dashboard');
     if (dashboard?.pending) return renderPending(dashboard.user);
     renderDashboard(activeView);
-  } catch {
+  } catch (error) {
+    console.error('dashboard_load_error', error);
     dashboard = null;
     hideChrome();
     renderLogin();

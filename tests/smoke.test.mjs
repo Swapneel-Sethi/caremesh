@@ -69,6 +69,32 @@ test('elder login and dashboard work end-to-end', async () => {
   assert.equal(dashboard.body.profile.name, 'Meera Rao');
   assert.ok(Array.isArray(dashboard.body.medications));
   assert.ok(dashboard.body.events.length > 0);
+  assert.ok(dashboard.body.careTeam.length > 0);
+  assert.ok(Array.isArray(dashboard.body.appointments));
+});
+
+test('caregiver login and dashboard work end-to-end', async () => {
+  const login = await request('/api/auth/login', { method:'POST', body: JSON.stringify({ role:'caregiver', passcode:'2468' }) });
+  assert.equal(login.response.status, 200);
+  const caregiverCookie = login.setCookie.split(';')[0];
+  const dashboard = await request('/api/dashboard', { headers: { cookie: caregiverCookie } });
+  assert.equal(dashboard.response.status, 200);
+  assert.equal(dashboard.body.profile.name, 'Meera Rao');
+  assert.ok(Array.isArray(dashboard.body.medications));
+  assert.ok(dashboard.body.careTeam.length > 0);
+  assert.ok(Array.isArray(dashboard.body.appointments));
+});
+
+test('family login and dashboard work end-to-end', async () => {
+  const login = await request('/api/auth/login', { method:'POST', body: JSON.stringify({ role:'family', passcode:'1357' }) });
+  assert.equal(login.response.status, 200);
+  const familyCookie = login.setCookie.split(';')[0];
+  const dashboard = await request('/api/dashboard', { headers: { cookie: familyCookie } });
+  assert.equal(dashboard.response.status, 200);
+  assert.equal(dashboard.body.profile.name, 'Meera Rao');
+  assert.ok(Array.isArray(dashboard.body.medications));
+  assert.ok(dashboard.body.careTeam.length > 0);
+  assert.ok(Array.isArray(dashboard.body.appointments));
 });
 
 test('family session cannot mutate medications or trigger reminders', async () => {
