@@ -1,0 +1,14 @@
+{
+  "mcp": {
+    "servers": {
+      "firebase": {
+        "type": "local",
+        "command": [
+          "npx",
+          "firebase-tools@latest",
+          "mcp"
+        ]
+      }
+    }
+  }
+}

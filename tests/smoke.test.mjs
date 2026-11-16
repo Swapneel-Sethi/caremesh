@@ -11,7 +11,12 @@ let familyCookie = '';
 let caregiverCookie = '';
 
 async function request(path, options = {}) {
-  const headers = { ...(options.body ? {'content-type':'application/json'} : {}), ...(options.headers || {}) };
+  const headers = {
+    ...(options.body ? {'content-type':'application/json'} : {}),
+    'origin': `http://127.0.0.1:${port}`,
+    'referer': `http://127.0.0.1:${port}/`,
+    ...(options.headers || {})
+  };
   const response = await fetch(`http://127.0.0.1:${port}${path}`, { ...options, headers });
   const text = await response.text();
   let body = {};
@@ -21,9 +26,10 @@ async function request(path, options = {}) {
 }
 
 before(async () => {
+  const { VERCEL, ...env } = process.env;
   child = spawn(process.execPath, ['server.mjs'], {
     env: {
-      ...process.env,
+      ...env,
       PORT: String(port),
       NODE_ENV: 'test',
       SESSION_SECRET: 'test-session-secret',

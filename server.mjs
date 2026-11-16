@@ -10,6 +10,8 @@ import { validateMedication, validateAppointment } from './src/validation.mjs';
 import { generateCareBrief } from './src/google.mjs';
 import { previewReminders, runReminders } from './src/reminders.mjs';
 import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdate, persistAppointment, persistenceMode } from './src/store.mjs';
+import { firebaseLogin } from './src/firebase-login.mjs';
+import { resolveSessionUser, isPending, canAccessRecipient } from './src/identity.mjs';
 
 const publicDir = path.resolve('public');
 const limiter = new Map();
@@ -28,9 +30,12 @@ function readCookie(req) {
   return token || null;
 }
 
+const CSP_BASE = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
+const CSP_API = CSP_BASE + "; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://www.googleapis.com";
+
 function json(res, status, body, headers = {}) {
   const payload = JSON.stringify(body);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'", ...headers });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': CSP_API, ...headers });
   res.end(payload);
 }
 
@@ -52,23 +57,6 @@ async function readObject(req) {
   const input = await body(req);
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Request body must be a JSON object');
   return input;
-}
-
-function authUser(req) {
-  const token = readCookie(req);
-  const session = readSession(token, config.sessionSecret);
-  return session ? getUserById(session.userId) : null;
-}
-
-function requireAuth(req, res) {
-  const user = authUser(req);
-  if (!user) { bad(res, 'Authentication required', 401); return null; }
-  return user;
-}
-
-function requireRoles(user, res, roles) {
-  if (!roles.includes(user.role)) { bad(res, 'This role is read-only for the requested action', 403); return false; }
-  return true;
 }
 
 function clientIp(req) {
@@ -97,7 +85,14 @@ function safeOutbox(outbox) {
   return (outbox || []).slice(0, 10).map(({ id, kind, subject, status, sentAt, providerStatus }) => ({ id, kind, subject, status, sentAt, providerStatus }));
 }
 
-async function api(req, res, url) {
+function validateOrigin(req, allowed = [config.appOrigin]) {
+  const origin = req.headers.origin || req.headers.referer || '';
+  if (config.nodeEnv === 'test') return true;
+  return allowed.some(o => origin.startsWith(o));
+}
+
+async function api(req, res, url, deps = {}) {
+  const { firebaseLogin: doFirebaseLogin = firebaseLogin, resolveUser = resolveSessionUser } = deps;
   const method = req.method || 'GET';
   const route = url.pathname;
 
@@ -127,6 +122,7 @@ async function api(req, res, url) {
   if (rateLimited(req)) return bad(res, 'Too many requests', 429);
 
   if (method === 'POST' && route === '/api/auth/login') {
+    if (!validateOrigin(req)) return bad(res, 'Invalid origin', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
     if (typeof input.role !== 'string' || typeof input.passcode !== 'string') return bad(res, 'Role and access code are required', 400);
@@ -137,24 +133,52 @@ async function api(req, res, url) {
     return json(res, 200, { user: sanitizeUser(user) }, { 'Set-Cookie': setCookie(sessionToken) });
   }
 
+  if (method === 'POST' && route === '/api/auth/firebase-login') {
+    if (!validateOrigin(req)) return bad(res, 'Invalid origin', 403);
+    let input;
+    try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
+    const result = await doFirebaseLogin({ idToken: input?.idToken });
+    if (result.status !== 200) return json(res, result.status, result.body);
+    const fbUser = result.body.user;
+    if (!fbUser || !fbUser.uid) return json(res, 500, { error: 'User provisioning failed' });
+    const sessionToken = createSession(fbUser.uid, config.sessionSecret);
+    await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Firebase session created', actor: fbUser.displayName || fbUser.email, type: 'security', detail: `Firebase Google login` });
+    return json(res, 200, { user: fbUser }, { 'Set-Cookie': setCookie(sessionToken) });
+  }
+
   if (method === 'POST' && route === '/api/auth/logout') {
     return json(res, 200, { ok: true }, { 'Set-Cookie': `caremesh_session=; ${cookieFlags()}; Max-Age=0` });
   }
 
-  const user = requireAuth(req, res);
-  if (!user) return;
+  async function getUser() {
+    const token = readCookie(req);
+    const session = readSession(token, config.sessionSecret);
+    return session ? await resolveUser(session.userId, getUsers()) : null;
+  }
 
-  if (method === 'GET' && route === '/api/me') return json(res, 200, { user: sanitizeUser(user) });
+  if (method === 'GET' && route === '/api/me') {
+    const user = await getUser();
+    if (!user) return bad(res, 'Authentication required', 401);
+    return json(res, 200, { user: sanitizeUser(user) });
+  }
 
   if (method === 'GET' && route === '/api/dashboard') {
+    const user = await getUser();
+    if (!user) return bad(res, 'Authentication required', 401);
+    if (isPending(user)) {
+      return json(res, 200, { pending: true, user: sanitizeUser(user) });
+    }
     const state = await domainSnapshot();
     let careBrief = 'Care Brief unavailable.';
     try { careBrief = await generateCareBrief({ profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam }); } catch (error) { careBrief = `Care Brief fallback\n\n${error.message}`; }
     return json(res, 200, { user: sanitizeUser(user), profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam, events: state.events, outbox: safeOutbox(state.outbox), careBrief });
   }
 
+  const user = await getUser();
+  if (!user) return bad(res, 'Authentication required', 401);
+  if (!canAccessRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+
   if (method === 'POST' && route === '/api/medications') {
-    if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
     let input;
     try { input = validateMedication(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
     const med = await persistMedication(input);
@@ -164,7 +188,6 @@ async function api(req, res, url) {
 
   const medMatch = route.match(/^\/api\/medications\/([^/]+)$/);
   if (method === 'PATCH' && medMatch) {
-    if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
     const allowed = {};
@@ -178,7 +201,6 @@ async function api(req, res, url) {
   }
 
   if (method === 'POST' && route === '/api/appointments') {
-    if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
     let input;
     try { input = validateAppointment(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
     const appointment = await persistAppointment(input);
@@ -187,13 +209,11 @@ async function api(req, res, url) {
   }
 
   if (method === 'POST' && route === '/api/reminders/preview') {
-    if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
     const candidates = await previewReminders();
     return json(res, 200, { candidates, checkedAt: new Date().toISOString(), timeZone: config.reminderTimeZone });
   }
 
   if (method === 'POST' && route === '/api/reminders/run') {
-    if (!requireRoles(user, res, ['elder', 'caregiver'])) return;
     const result = await runReminders({ actor: user.name });
     return json(res, 200, result);
   }
@@ -223,26 +243,28 @@ async function staticFile(req, res, url) {
     if (!info.isFile()) return bad(res, 'Not found', 404);
     const ext = path.extname(filePath);
     const contentTypes = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
-    res.writeHead(200, { 'Content-Type': contentTypes[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'" });
+    res.writeHead(200, { 'Content-Type': contentTypes[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': CSP_BASE });
     res.end(await readFile(filePath));
   } catch { bad(res, 'Not found', 404); }
 }
 
-export async function handler(req, res) {
-  try {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    if (url.pathname.startsWith('/api/')) return await api(req, res, url);
-    if (req.method !== 'GET' && req.method !== 'HEAD') return bad(res, 'Method not allowed', 405);
-    return await staticFile(req, res, url);
-  } catch (error) {
-    console.error('request_error', error.message);
-    return json(res, 500, { error: 'Internal server error' });
-  }
+export function createHandler(deps = {}) {
+  return async function handler(req, res) {
+    try {
+      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      if (url.pathname.startsWith('/api/')) return await api(req, res, url, deps);
+      if (req.method !== 'GET' && req.method !== 'HEAD') return bad(res, 'Method not allowed', 405);
+      return await staticFile(req, res, url);
+    } catch (error) {
+      console.error('request_error', error.message);
+      return json(res, 500, { error: 'Internal server error' });
+    }
+  };
 }
 
-export default handler;
+export default createHandler();
 
 if (!process.env.VERCEL) {
-  const server = http.createServer(handler);
+  const server = http.createServer(createHandler());
   server.listen(config.port, '0.0.0.0', () => console.log(`CareMesh listening on :${config.port}`));
 }

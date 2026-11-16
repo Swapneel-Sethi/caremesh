@@ -881,6 +881,76 @@ function hideChrome() {
   logoutButton.classList.add('hidden');
 }
 
+let firebaseApp = null;
+let firebaseAuth = null;
+
+async function loadFirebase() {
+  if (firebaseApp) return;
+  const mod = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+  const authMod = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+  const cfg = await fetch('/firebase-config.json').then(r => r.json());
+  firebaseApp = mod.initializeApp(cfg);
+  firebaseAuth = authMod.getAuth(firebaseApp);
+  firebaseAuth.useDeviceLanguage();
+  return { firebaseAuth, GoogleAuthProvider: authMod.GoogleAuthProvider, signInWithPopup: authMod.signInWithPopup };
+}
+
+async function handleGoogleSignIn() {
+  const btn = document.querySelector('#google-login-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+  try {
+    const { firebaseAuth, GoogleAuthProvider, signInWithPopup } = await loadFirebase();
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await signInWithPopup(firebaseAuth, provider);
+    await firebaseAuth.signOut();
+    const idToken = await result.user.getIdToken();
+    await api('/api/auth/firebase-login', { method: 'POST', body: JSON.stringify({ idToken }) });
+    await loadDashboard();
+  } catch (error) {
+    const errorNode = document.querySelector('#login-error');
+    const msg = error.code === 'auth/popup-closed-by-user' ? 'Sign-in was cancelled.' : error.code === 'auth/unauthorized-domain' ? 'This domain is not authorized for Firebase Auth. Contact support.' : error.message;
+    if (errorNode) { errorNode.textContent = friendlyError(msg); errorNode.hidden = false; errorNode.focus(); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Continue with Google'; }
+  }
+}
+
+function renderPending(user) {
+  hideChrome();
+  document.title = 'CareMesh — Access Pending';
+  main.setAttribute('aria-busy', 'false');
+  main.innerHTML = `
+    <section class="login">
+      <div class="login-copy">
+        <p class="eyebrow">Access pending</p>
+        <h1>Your account is waiting for approval</h1>
+        <p class="lead">A care recipient or administrator must grant you access before you can view care details.</p>
+        <ul class="login-points">
+          <li><span class="tick" aria-hidden="true">✓</span><span>Your identity is verified with Google</span></li>
+          <li><span class="tick" aria-hidden="true">✓</span><span>An elder or caregiver will review your request</span></li>
+          <li><span class="tick" aria-hidden="true">✓</span><span>You will receive an email when access is granted</span></li>
+        </ul>
+      </div>
+      <div class="card login-card pending-card">
+        <h2>${escapeHtml(user.displayName || user.email || 'Your account')}</h2>
+        <p class="row-meta">Role: <strong>${user.role || 'pending'}</strong> · Status: <strong>${user.status || 'pending'}</strong></p>
+        <p class="row-meta">Email: ${escapeHtml(user.email || '—')}</p>
+        <form id="pending-logout-form">
+          <button class="button button-secondary button-large" type="submit">Sign out</button>
+        </form>
+      </div>
+    </section>`;
+  document.querySelector('#pending-logout-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch {}
+    dashboard = null;
+    activeView = 'overview';
+    history.replaceState(null, '', location.pathname);
+    hideChrome();
+    renderLogin();
+  });
+}
+
 function renderLogin() {
   hideChrome();
   document.title = 'CareMesh — Sign in';
@@ -898,7 +968,12 @@ function renderLogin() {
         </ul>
       </div>
       <div class="card login-card">
-        <h2>Sign in</h2>
+        <h2>Sign in with Google</h2>
+        <button id="google-login-btn" class="button button-google button-large" type="button">
+          <svg class="google-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          <span>Continue with Google</span>
+        </button>
+        <div class="divider" aria-hidden="true"><span>or</span></div>
         <p class="row-meta">Choose who you are, then enter the 4-digit access code.</p>
         <fieldset class="role-picker">
           <legend>I am the…</legend>
@@ -920,6 +995,8 @@ function renderLogin() {
         </div>
       </div>
     </section>`;
+
+  document.querySelector('#google-login-btn').addEventListener('click', handleGoogleSignIn);
 
   document.querySelectorAll('[data-role]').forEach((button) => button.addEventListener('click', () => {
     selectedRole = button.dataset.role;
@@ -954,6 +1031,7 @@ async function loadDashboard() {
   main.setAttribute('aria-busy', 'true');
   try {
     dashboard = await api('/api/dashboard');
+    if (dashboard?.pending) return renderPending(dashboard.user);
     renderDashboard(activeView);
   } catch {
     dashboard = null;

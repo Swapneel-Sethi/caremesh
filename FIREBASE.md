@@ -20,9 +20,9 @@ API key identifies the project; it is not an admin credential or a secret. No se
 account key, Admin SDK credential, OAuth client secret, or server token is stored in
 this repository.
 
-`public/firebase-config.json` is not imported by `public/app.js` yet. The current
-passcode demo login, signed sessions, `store.mjs`, reminder engine, and email engine are
-unchanged.
+`public/firebase-config.json` is loaded by `public/app.js` when the Google login button
+is clicked. The current passcode demo login, signed sessions, `store.mjs`, reminder
+engine, and email engine are unchanged.
 
 ## Authentication model
 
@@ -45,12 +45,41 @@ unchanged.
 to a recipient and assign a role. This is the safest default and never escalates
 privileges.
 
+### Auth flow
+
+1. User clicks **Continue with Google** on the login page.
+2. Browser loads Firebase Web SDK from `gstatic.com` (lazy, dynamic import).
+3. `signInWithPopup` with Google provider opens consent screen.
+4. On success, browser gets Firebase ID token, immediately signs out of Firebase.
+5. Browser POSTs ID token to `/api/auth/firebase-login`.
+6. Backend verifies token with Admin SDK (revocation check enabled).
+7. Backend provisions/updates `users/{uid}` in Firestore:
+   - New user: `role: "pending"`, `status: "pending"`
+   - Existing user: only `email`, `displayName`, `lastSignInAt` updated; `role`/`status` preserved
+8. Backend issues signed CareMesh session cookie (HttpOnly, Secure in prod, SameSite=Lax, 8h TTL).
+9. Browser receives session, loads dashboard.
+10. If `role: "pending"`, dashboard returns `{ pending: true, user }` and shows pending screen.
+11. Pending users get 403 for all care-data routes; `/api/me` and logout remain available.
+
 ### Authorized domains
 
-The project currently authorizes `caremesh-flare-2026.firebaseapp.com` and
-`caremesh-flare-2026.web.app`. Before wiring the browser client, add the origins that
-will actually run sign-in (for example `localhost` for development and the Vercel
-deployment origin) in Firebase Authentication → Settings → Authorized domains.
+The project authorizes:
+- `caremesh-flare-2026.firebaseapp.com`
+- `caremesh-flare-2026.web.app`
+- `localhost`
+- `127.0.0.1`
+- `caremesh-one.vercel.app` (production)
+- `caremesh-git-flare-v2-foraipurposes7-6330s-projects.vercel.app` (flare-v2 preview)
+
+Configure in Firebase Authentication → Settings → Authorized domains.
+
+### CSP additions for Firebase Auth
+
+`Content-Security-Policy` on API responses includes:
+- `script-src 'self' https://www.gstatic.com https://apis.google.com`
+- `connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://www.googleapis.com`
+
+Static files retain the base CSP without Firebase origins.
 
 ## Target Firestore data model
 
@@ -136,3 +165,22 @@ region; if latency to Firestore becomes relevant, co-locate the function region
 - Realtime Database
 - Billing / Blaze plan
 - Firestore data migration (there is no real data)
+
+## Admin SDK configuration
+
+Required environment variables (set in Vercel project settings, never in repo):
+
+```
+FIREBASE_PROJECT_ID=caremesh-flare-2026
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@caremesh-flare-2026.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+`FIREBASE_PRIVATE_KEY` must contain literal newlines (`\n` in shell, actual newlines in Vercel dashboard). The backend handles escaped `\n` from environment.
+
+If any variable is missing, Firebase login returns 503 while demo login continues to work.
+
+## Transitional session
+
+The custom HMAC signed session cookie remains the session mechanism. Firebase session
+cookies are not used. This avoids a migration and keeps the existing auth gates intact.
