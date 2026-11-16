@@ -96,6 +96,7 @@ careRecipients/{recipientId}
   events/{eventId}
   reminders/{reminderId}
   outbox/{messageId}
+  invitations/{invitationId}
 ```
 
 ### `users/{uid}`
@@ -143,6 +144,33 @@ Why: CareMesh is server-mediated (`Browser -> CareMesh backend -> Firebase Admin
 Firestore`). The backend is the only writer and the only authorization boundary. The
 Admin SDK bypasses client rules. There is no `allow read, write: if true` and no broad
 "any authenticated user" access.
+
+## Invitation flow
+
+Pending Google accounts gain care-recipient access through explicit invitations:
+
+1. Elder or caregiver creates invitation: `POST /api/invitations` with `{ invitedUid, role, expiresAt }`
+2. Invitation stored in `careRecipients/{recipientId}/invitations/{invitationId}` with `status: "pending"` and `expiresAt`
+3. Invited user accepts: `POST /api/invitations/{invitationId}/accept` (must match `invitedUid`)
+4. On acceptance: care team membership created in `careRecipients/{recipientId}/careTeam/{uid}` with `status: "active"` and assigned role
+5. Invitation can be revoked: `POST /api/invitations/{invitationId}/revoke` (elder/caregiver only)
+
+Invitation constraints:
+- No self-assigned privileged roles (inviter cannot invite themselves as elder/caregiver)
+- Invitations expire (default 7 days)
+- Duplicate invitations safely handled (each has unique ID)
+- Acceptance verifies the invited Google identity matches `invitedUid`
+- Membership creation is idempotent
+- Only elder/authorized owner can create or revoke invitations
+
+## IDOR prevention
+
+Every care-data endpoint verifies authenticated user + membership + role + recipient ownership:
+
+- `checkRecipientAccess(user, recipientId)` confirms the user has an active care team membership for the recipient
+- A `recipientId` supplied by the browser is treated as a request parameter, never as proof of access
+- Family role is read-only for all mutations
+- Pending users receive no care-recipient data (403 on all care-data routes)
 
 ## Indexes
 

@@ -3,6 +3,10 @@ import { domainSnapshot, persistEvent, persistReminder, reminderKeys } from './s
 import { sendReminder } from './email.mjs';
 import { clockLabel, dateLong, dayOffset, localParts, scheduleLabel, timeToMinutes } from './time.mjs';
 
+function getUserSnapshot(snapshot, user) {
+  return { ...snapshot, _user: user };
+}
+
 const UPCOMING_MEDICATION_MINUTES = 60;
 const MEDICATION_DUE_NOW_MINUTES = 15;
 const MEDICATION_GRACE_MINUTES = 30;
@@ -137,9 +141,9 @@ function eventTitle(kind, status) {
   return 'Appointment reminder sent';
 }
 
-export async function previewReminders({ now = new Date(), snapshot } = {}) {
-  const state = snapshot || await domainSnapshot();
-  const existing = await reminderKeys();
+export async function previewReminders({ now = new Date(), snapshot, user } = {}) {
+  const state = snapshot || await domainSnapshot(user);
+  const existing = await reminderKeys(user);
   return buildReminderCandidates(state, now).map((candidate) => ({
     ...candidate.summary,
     subject: candidate.subject,
@@ -147,9 +151,9 @@ export async function previewReminders({ now = new Date(), snapshot } = {}) {
   }));
 }
 
-export async function runReminders({ actor = 'CarePulse', now = new Date(), snapshot } = {}) {
-  const state = snapshot || await domainSnapshot();
-  const existing = await reminderKeys();
+export async function runReminders({ actor = 'CarePulse', now = new Date(), snapshot, user } = {}) {
+  const state = snapshot || await domainSnapshot(user);
+  const existing = await reminderKeys(user);
   const results = [];
 
   for (const candidate of buildReminderCandidates(state, now)) {
@@ -167,11 +171,11 @@ export async function runReminders({ actor = 'CarePulse', now = new Date(), snap
     });
 
     if (delivery.status === 'sent' || delivery.status === 'preview') {
-      await persistReminder({ key: candidate.key, kind: candidate.kind, status: delivery.status, at: now.toISOString() });
+      await persistReminder(user, { key: candidate.key, kind: candidate.kind, status: delivery.status, at: now.toISOString() });
       existing.add(candidate.key);
     }
 
-    await persistEvent({
+    await persistEvent(user, {
       at: clockLabel(now, config.reminderTimeZone),
       title: eventTitle(candidate.kind, delivery.status),
       actor,

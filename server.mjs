@@ -9,7 +9,7 @@ import { createSession, readSession, verifyPasscode } from './src/security.mjs';
 import { validateMedication, validateAppointment } from './src/validation.mjs';
 import { generateCareBrief } from './src/google.mjs';
 import { previewReminders, runReminders } from './src/reminders.mjs';
-import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdate, persistAppointment, persistenceMode } from './src/store.mjs';
+import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdate, persistAppointment, persistenceMode, createInvitation, getInvitation, getInvitationsByRecipient, acceptInvitation, revokeInvitation, checkRecipientAccess, addCareTeamMember, removeCareTeamMember, getCareTeamMembers } from './src/store.mjs';
 import { firebaseLogin } from './src/firebase-login.mjs';
 import { resolveSessionUser, isPending, canAccessRecipient } from './src/identity.mjs';
 
@@ -115,7 +115,8 @@ async function api(req, res, url, deps = {}) {
     const header = String(req.headers.authorization || '');
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
     if (!safeEqual(token, config.cronSecret)) return bad(res, 'Unauthorized', 401);
-    const result = await runReminders({ actor: 'CarePulse schedule' });
+    const cronUser = { id: 'cron', name: 'CarePulse schedule', role: 'caregiver', status: 'active', source: 'cron' };
+    const result = await runReminders({ actor: 'CarePulse schedule', user: cronUser });
     return json(res, 200, { ok: true, ...result });
   }
 
@@ -130,7 +131,7 @@ async function api(req, res, url, deps = {}) {
     const user = getUsers().find((item) => item.role === input.role);
     if (!user || !verifyPasscode(input.passcode, user.salt, user.hash)) return bad(res, 'Invalid access code', 401);
     const sessionToken = createSession(user.id, config.sessionSecret);
-    await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Secure access session created', actor: user.name, type: 'security', detail: `${user.role} portal` });
+    await persistEvent(user, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Secure access session created', actor: user.name, type: 'security', detail: `${user.role} portal` });
     return json(res, 200, { user: sanitizeUser(user) }, { 'Set-Cookie': setCookie(sessionToken) });
   }
 
@@ -144,7 +145,7 @@ async function api(req, res, url, deps = {}) {
     const fbUser = result.body.user;
     if (!fbUser || !fbUser.uid) return json(res, 500, { error: 'User provisioning failed' });
     const sessionToken = createSession(fbUser.uid, config.sessionSecret);
-    await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Firebase session created', actor: fbUser.displayName || fbUser.email, type: 'security', detail: `Firebase Google login` });
+    await persistEvent({ id: fbUser.uid, name: fbUser.displayName || fbUser.email, role: fbUser.role || 'pending', status: fbUser.status || 'pending', source: 'firebase' }, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Firebase session created', actor: fbUser.displayName || fbUser.email, type: 'security', detail: `Firebase Google login` });
     return json(res, 200, { user: fbUser }, { 'Set-Cookie': setCookie(sessionToken) });
   }
 
@@ -171,7 +172,13 @@ async function api(req, res, url, deps = {}) {
     if (isPending(user)) {
       return json(res, 200, { pending: true, user: sanitizeUser(user) });
     }
-    const state = await domainSnapshot();
+    let state;
+    try {
+      state = await domainSnapshot(user);
+    } catch (error) {
+      console.error('dashboard domainSnapshot error:', error);
+      return json(res, 500, { error: 'Dashboard snapshot failed', detail: error.message });
+    }
     let careBrief = 'Care Brief unavailable.';
     try { careBrief = await generateCareBrief({ profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam }); } catch (error) { careBrief = `Care Brief fallback\n\n${error.message}`; }
     return json(res, 200, { user: sanitizeUser(user), profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam, events: state.events, outbox: safeOutbox(state.outbox), careBrief });
@@ -179,13 +186,25 @@ async function api(req, res, url, deps = {}) {
 
   const user = await getUser();
   if (!user) return bad(res, 'Authentication required', 401);
+  const recipientId = user?.source === 'local' ? 'demo-recipient' : 'demo-recipient';
+
+  const invMatch = route.match(/^\/api\/invitations\/([^/]+)\/accept$/);
+  if (method === 'POST' && invMatch) {
+    try {
+      const membership = await acceptInvitation(user, recipientId, invMatch[1]);
+      await persistEvent(user, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Invitation accepted', actor: user.name, type: 'security', detail: `Joined care circle as ${membership.role}` });
+      return json(res, 200, { membership });
+    } catch (error) { return bad(res, error.message, 400); }
+  }
+
   if (!canAccessRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+  if (!(await checkRecipientAccess(user, recipientId))) return bad(res, 'No access to this care recipient', 403);
 
   if (method === 'POST' && route === '/api/medications') {
     let input;
     try { input = validateMedication(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
-    const med = await persistMedication(input);
-    await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Medication schedule created', actor: user.name, type: 'medication', detail: med.name });
+    const med = await persistMedication(user, input);
+    await persistEvent(user, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Medication schedule created', actor: user.name, type: 'medication', detail: med.name });
     return json(res, 201, { medication: med });
   }
 
@@ -197,33 +216,63 @@ async function api(req, res, url, deps = {}) {
     if (['pending', 'taken', 'missed'].includes(input.status)) allowed.status = input.status;
     if (typeof input.instructions === 'string' && input.instructions.trim()) allowed.instructions = input.instructions.trim().slice(0, 220);
     if (!Object.keys(allowed).length) return bad(res, 'No valid medication update provided', 400);
-    const med = await persistMedicationUpdate(medMatch[1], allowed);
+    const med = await persistMedicationUpdate(user, medMatch[1], allowed);
     if (!med) return bad(res, 'Medication not found', 404);
-    await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: `Medication marked ${med.status}`, actor: user.name, type: 'medication', detail: med.name });
+    await persistEvent(user, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: `Medication marked ${med.status}`, actor: user.name, type: 'medication', detail: med.name });
     return json(res, 200, { medication: med });
   }
 
   if (method === 'POST' && route === '/api/appointments') {
     let input;
     try { input = validateAppointment(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
-    const appointment = await persistAppointment(input);
-    await persistEvent({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Appointment added', actor: user.name, type: 'appointment', detail: `${appointment.doctor} · ${appointment.date}` });
+    const appointment = await persistAppointment(user, input);
+    await persistEvent(user, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Appointment added', actor: user.name, type: 'appointment', detail: `${appointment.doctor} · ${appointment.date}` });
     return json(res, 201, { appointment });
   }
 
   if (method === 'POST' && route === '/api/reminders/preview') {
-    const candidates = await previewReminders();
+    const candidates = await previewReminders({ user });
     return json(res, 200, { candidates, checkedAt: new Date().toISOString(), timeZone: config.reminderTimeZone });
   }
 
   if (method === 'POST' && route === '/api/reminders/run') {
-    const result = await runReminders({ actor: user.name });
+    const result = await runReminders({ actor: user.name, user });
     return json(res, 200, result);
+  }
+
+  if (method === 'POST' && route === '/api/invitations') {
+    if (!canAccessRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    let input;
+    try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
+    const { invitedUid, role, expiresAt } = input;
+    if (!invitedUid || typeof invitedUid !== 'string') return bad(res, 'Invited user ID is required', 400);
+    if (!role || !['elder', 'caregiver', 'family'].includes(role)) return bad(res, 'Valid role is required', 400);
+    try {
+      const invitation = await createInvitation(user, recipientId, invitedUid, role, expiresAt);
+      await persistEvent(user, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Care invitation created', actor: user.name, type: 'security', detail: `Invite ${invitedUid} as ${role}` });
+      return json(res, 201, { invitation });
+    } catch (error) { return bad(res, error.message, 400); }
+  }
+
+  const invRevokeMatch = route.match(/^\/api\/invitations\/([^/]+)\/revoke$/);
+  if (method === 'POST' && invRevokeMatch) {
+    if (!canAccessRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    try {
+      await revokeInvitation(recipientId, invRevokeMatch[1]);
+      return json(res, 200, { ok: true });
+    } catch (error) { return bad(res, error.message, 400); }
+  }
+
+  if (method === 'GET' && route === '/api/invitations') {
+    try {
+      const invitations = await getInvitationsByRecipient(recipientId);
+      return json(res, 200, { invitations });
+    } catch (error) { return bad(res, error.message, 400); }
   }
 
   if (method === 'POST' && route === '/api/care-brief') {
     try {
-      const state = await domainSnapshot();
+      const state = await domainSnapshot(user);
       const careBrief = await generateCareBrief({ profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam });
       return json(res, 200, { careBrief });
     } catch { return bad(res, 'Care Brief generation failed', 503); }

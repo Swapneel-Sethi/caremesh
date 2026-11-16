@@ -169,3 +169,35 @@ test('existing family user preserves role and status', async () => {
   await runHandler(handler, writeReq, writeRes);
   assert.equal(writeRes.status, 403);
 });
+
+test('invitation creation rejects missing invitedUid', async () => {
+  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-elder', name: 'Elder', role: 'elder', status: 'active', email: 'e@example.com', initials: 'ER', source: 'local' }) });
+  const req = makeReq('POST', '/api/invitations', { role: 'family' }, makeSessionCookie('usr-elder'));
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 400);
+});
+
+test('invitation creation rejects invalid role', async () => {
+  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-elder', name: 'Elder', role: 'elder', status: 'active', email: 'e@example.com', initials: 'ER', source: 'local' }) });
+  const req = makeReq('POST', '/api/invitations', { invitedUid: 'new-user', role: 'admin' }, makeSessionCookie('usr-elder'));
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 400);
+});
+
+test('invitation creation rejected for family role', async () => {
+  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-family', name: 'Family', role: 'family', status: 'active', email: 'f@example.com', initials: 'FA', source: 'local' }) });
+  const req = makeReq('POST', '/api/invitations', { invitedUid: 'new-user', role: 'family' }, makeSessionCookie('usr-family'));
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 403);
+});
+
+test('invitation acceptance requires Firestore', async () => {
+  const handler = createHandler({ resolveUser: async () => ({ id: 'new-user', name: 'New User', role: 'pending', status: 'pending', email: 'n@example.com', initials: 'NU', source: 'local' }) });
+  const req = makeReq('POST', '/api/invitations/inv-123/accept', {}, makeSessionCookie('new-user'));
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 400);
+});

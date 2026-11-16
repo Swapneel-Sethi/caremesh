@@ -1,150 +1,260 @@
 import crypto from 'node:crypto';
-import { config } from './config.mjs';
+import { getAdminDb, isFirebaseAdminReady } from './firebase-admin.mjs';
 import { getState as memoryState, addEvent as memoryAddEvent, addMedication as memoryAddMedication, updateMedication as memoryUpdateMedication, addAppointment as memoryAddAppointment } from './data.mjs';
 
-const useFirestore = Boolean(config.googleProject && process.env.USE_FIRESTORE !== 'false');
-let cachedToken = null;
-let cachedExpiry = 0;
+const useFirestore = isFirebaseAdminReady();
+const DEMO_RECIPIENT_ID = 'demo-recipient';
 
-async function googleToken() {
-  if (cachedToken && cachedExpiry > Date.now() + 60_000) return cachedToken;
-  const response = await fetch('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', { headers: { 'Metadata-Flavor': 'Google' } });
-  if (!response.ok) throw new Error(`Google metadata token request failed: ${response.status}`);
-  const body = await response.json();
-  cachedToken = body.access_token;
-  cachedExpiry = Date.now() + Number(body.expires_in || 300) * 1000;
-  return cachedToken;
+function getRecipientId(user) {
+  if (user?.source === 'local') return DEMO_RECIPIENT_ID;
+  return DEMO_RECIPIENT_ID;
 }
 
-function firestoreValue(value) {
-  if (value === null) return { nullValue: null };
-  if (typeof value === 'boolean') return { booleanValue: value };
-  if (typeof value === 'number' && Number.isInteger(value)) return { integerValue: String(value) };
-  if (typeof value === 'number') return { doubleValue: value };
-  if (Array.isArray(value)) return { arrayValue: { values: value.map(firestoreValue) } };
-  if (value instanceof Date) return { timestampValue: value.toISOString() };
-  if (typeof value === 'object') return { mapValue: { fields: Object.fromEntries(Object.entries(value).map(([key, val]) => [key, firestoreValue(val)])) } };
-  return { stringValue: String(value) };
+function recipientCollectionPath(recipientId, collection) {
+  return `careRecipients/${recipientId}/${collection}`;
 }
 
-function fromFirestoreValue(value) {
-  if ('stringValue' in value) return value.stringValue;
-  if ('integerValue' in value) return Number(value.integerValue);
-  if ('doubleValue' in value) return value.doubleValue;
-  if ('booleanValue' in value) return value.booleanValue;
-  if ('nullValue' in value) return null;
-  if ('timestampValue' in value) return value.timestampValue;
-  if ('arrayValue' in value) return (value.arrayValue.values || []).map(fromFirestoreValue);
-  if ('mapValue' in value) return Object.fromEntries(Object.entries(value.mapValue.fields || {}).map(([key, val]) => [key, fromFirestoreValue(val)]));
-  return undefined;
+function docRef(db, recipientId, collection, id) {
+  return db.collection(recipientCollectionPath(recipientId, collection)).doc(id);
 }
 
-async function fsRequest(url, options = {}) {
-  const token = await googleToken();
-  const response = await fetch(url, { ...options, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Firestore ${response.status}: ${text.slice(0, 300)}`);
+async function ensureDemoRecipient(db, recipientId) {
+  const ref = db.collection('careRecipients').doc(recipientId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    await ref.set({
+      displayName: 'Meera Rao',
+      preferredName: 'Meera',
+      timezone: 'Asia/Kolkata',
+      status: 'active',
+      ownerUid: 'usr-elder',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
   }
-  return response.status === 204 ? null : response.json();
 }
 
-function collectionUrl(collection) {
-  return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(config.googleProject)}/databases/(default)/documents/${collection}`;
-}
-
-async function listCollection(collection) {
-  const body = await fsRequest(collectionUrl(collection));
-  return (body?.documents || []).map((doc) => ({ id: doc.name.split('/').pop(), ...Object.fromEntries(Object.entries(doc.fields || {}).map(([key, value]) => [key, fromFirestoreValue(value)])) }));
-}
-
-async function upsert(collection, id, data) {
-  await fsRequest(`${collectionUrl(collection)}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ fields: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, firestoreValue(value)])) }) });
-  return { id, ...data };
-}
-
-async function deleteDoc(collection, id) {
-  await fsRequest(`${collectionUrl(collection)}/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-async function seedIfMissing() {
-  const [medications, appointments, events, careTeam, profiles] = await Promise.all(['medications','appointments','events','careTeam','profiles'].map(listCollection));
-  const state = memoryState();
-  if (!profiles.length) await Promise.all(state.profiles.map((doc) => upsert('profiles', doc.id, doc)));
-  if (!medications.length) await Promise.all(state.medications.map((doc) => upsert('medications', doc.id, doc)));
-  if (!appointments.length) await Promise.all(state.appointments.map((doc) => upsert('appointments', doc.id, doc)));
-  if (!events.length) await Promise.all(state.events.map((doc) => upsert('events', doc.id, doc)));
-  if (!careTeam.length) await Promise.all(state.careTeam.map((doc) => upsert('careTeam', doc.id, doc)));
-}
-
-let seeded = false;
-
-export async function domainSnapshot() {
+export async function domainSnapshot(user) {
   if (!useFirestore) return memoryState();
-  if (!seeded) { await seedIfMissing(); seeded = true; }
+
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  await ensureDemoRecipient(db, recipientId);
+
   const [profiles, medications, appointments, events, careTeam, outbox] = await Promise.all([
-    listCollection('profiles'), listCollection('medications'), listCollection('appointments'), listCollection('events'), listCollection('careTeam'), listCollection('outbox')
+    db.collection(recipientCollectionPath(recipientId, 'profiles')).get(),
+    db.collection(recipientCollectionPath(recipientId, 'medications')).get(),
+    db.collection(recipientCollectionPath(recipientId, 'appointments')).get(),
+    db.collection(recipientCollectionPath(recipientId, 'events')).orderBy('at', 'desc').limit(50).get(),
+    db.collection(recipientCollectionPath(recipientId, 'careTeam')).get(),
+    db.collection(recipientCollectionPath(recipientId, 'outbox')).limit(20).get()
   ]);
-  return { profiles, medications, appointments, events: events.sort((a,b) => String(b.at).localeCompare(String(a.at))).slice(0,50), careTeam, outbox: outbox.slice(0,20) };
+
+  return {
+    profiles: profiles.docs.map(d => ({ id: d.id, ...d.data() })),
+    medications: medications.docs.map(d => ({ id: d.id, ...d.data() })),
+    appointments: appointments.docs.map(d => ({ id: d.id, ...d.data() })),
+    events: events.docs.map(d => ({ id: d.id, ...d.data() })),
+    careTeam: careTeam.docs.map(d => ({ id: d.id, ...d.data() })),
+    outbox: outbox.docs.map(d => ({ id: d.id, ...d.data() }))
+  };
 }
 
-export async function persistEvent(event) {
+export async function persistEvent(user, event) {
   if (!useFirestore) return memoryAddEvent(event);
-  const record = { id: crypto.randomUUID(), ...event };
-  await upsert('events', record.id, record);
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  const record = { id: crypto.randomUUID(), ...event, recipientId, createdAt: new Date().toISOString() };
+  await docRef(db, recipientId, 'events', record.id).set(record);
   return record;
 }
 
-export async function persistMedication(input) {
+export async function persistMedication(user, input) {
   if (!useFirestore) return memoryAddMedication(input);
-  const medication = { id: crypto.randomUUID(), ...input, status: 'pending', ownerId: 'profile-elder', nextDue: `Today · ${input.schedule}` };
-  await upsert('medications', medication.id, medication);
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  const medication = {
+    id: crypto.randomUUID(),
+    ...input,
+    status: 'pending',
+    ownerId: 'profile-elder',
+    nextDue: `Today · ${input.schedule}`,
+    recipientId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  await docRef(db, recipientId, 'medications', medication.id).set(medication);
   return medication;
 }
 
-export async function persistMedicationUpdate(id, patch) {
+export async function persistMedicationUpdate(user, id, patch) {
   if (!useFirestore) return memoryUpdateMedication(id, patch);
-  const existing = (await listCollection('medications')).find((item) => item.id === id);
-  if (!existing) return null;
-  const updated = { ...existing, ...patch };
-  await upsert('medications', id, updated);
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  const ref = docRef(db, recipientId, 'medications', id);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const existing = snap.data();
+  const updated = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+  await ref.set(updated);
   return updated;
 }
 
-export async function persistAppointment(input) {
+export async function persistAppointment(user, input) {
   if (!useFirestore) return memoryAddAppointment(input);
-  const appointment = { id: crypto.randomUUID(), ...input, status: 'upcoming' };
-  await upsert('appointments', appointment.id, appointment);
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  const appointment = {
+    id: crypto.randomUUID(),
+    ...input,
+    status: 'upcoming',
+    recipientId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  await docRef(db, recipientId, 'appointments', appointment.id).set(appointment);
   return appointment;
 }
 
-export async function persistOutbox(message) {
+export async function persistOutbox(userOrMessage, maybeMessage) {
+  let user, message;
+  if (maybeMessage === undefined) {
+    message = userOrMessage;
+    user = { id: 'system', name: 'CarePulse system', role: 'caregiver', status: 'active', source: 'cron' };
+  } else {
+    user = userOrMessage;
+    message = maybeMessage;
+  }
   if (!useFirestore) {
     const state = memoryState();
     state.outbox.unshift(message);
     state.outbox = state.outbox.slice(0, 50);
     return message;
   }
-  await upsert('outbox', message.id, message);
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  await docRef(db, recipientId, 'outbox', message.id).set({ ...message, recipientId });
   return message;
 }
 
-export async function reminderKeys() {
+export async function reminderKeys(user) {
   if (!useFirestore) return new Set((memoryState().reminders || []).map((record) => record.key));
-  const records = await listCollection('reminders');
-  return new Set(records.map((record) => record.key));
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  const snap = await db.collection(recipientCollectionPath(recipientId, 'reminders')).get();
+  return new Set(snap.docs.map(d => d.data().key));
 }
 
-export async function persistReminder(record) {
+export async function persistReminder(user, record) {
   if (!useFirestore) {
     const state = memoryState();
     state.reminders.unshift(record);
     state.reminders = state.reminders.slice(0, 200);
     return record;
   }
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
   const id = crypto.createHash('sha256').update(record.key).digest('hex');
-  await upsert('reminders', id, record);
+  await docRef(db, recipientId, 'reminders', id).set({ ...record, recipientId });
   return record;
+}
+
+export async function getCareTeamMembers(user) {
+  if (!useFirestore) return memoryState().careTeam;
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  const snap = await db.collection(recipientCollectionPath(recipientId, 'careTeam')).get();
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+export async function addCareTeamMember(user, memberId, memberData) {
+  if (!useFirestore) throw new Error('Care team requires Firestore');
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  await docRef(db, recipientId, 'careTeam', memberId).set({ ...memberData, recipientId, addedAt: new Date().toISOString() });
+  return { id: memberId, ...memberData };
+}
+
+export async function removeCareTeamMember(user, memberId) {
+  if (!useFirestore) throw new Error('Care team requires Firestore');
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  await docRef(db, recipientId, 'careTeam', memberId).delete();
+}
+
+export async function createInvitation(inviter, recipientId, invitedUid, role, expiresAt) {
+  if (!useFirestore) throw new Error('Invitations require Firestore');
+  if (!['elder', 'caregiver', 'family'].includes(role)) throw new Error('Invalid role');
+  const db = getAdminDb();
+  const invitationId = crypto.randomUUID();
+  const invitation = {
+    id: invitationId,
+    recipientId,
+    invitedUid,
+    role,
+    status: 'pending',
+    invitedBy: inviter.id,
+    invitedByName: inviter.name,
+    createdAt: new Date().toISOString(),
+    expiresAt: expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  };
+  await docRef(db, recipientId, 'invitations', invitationId).set(invitation);
+  return invitation;
+}
+
+export async function getInvitation(recipientId, invitationId) {
+  if (!useFirestore) return null;
+  const db = getAdminDb();
+  const snap = await docRef(db, recipientId, 'invitations', invitationId).get();
+  if (!snap.exists) return null;
+  return { id: snap.id, ...snap.data() };
+}
+
+export async function getInvitationsByRecipient(recipientId) {
+  if (!useFirestore) return [];
+  const db = getAdminDb();
+  const snap = await db.collection(recipientCollectionPath(recipientId, 'invitations')).get();
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+export async function acceptInvitation(user, recipientId, invitationId) {
+  if (!useFirestore) throw new Error('Invitations require Firestore');
+  const db = getAdminDb();
+  const invitation = await getInvitation(recipientId, invitationId);
+  if (!invitation) throw new Error('Invitation not found');
+  if (invitation.status !== 'pending') throw new Error('Invitation is not pending');
+  if (invitation.invitedUid !== user.id) throw new Error('Invitation is not for this user');
+  if (new Date(invitation.expiresAt) < new Date()) {
+    await docRef(db, recipientId, 'invitations', invitationId).update({ status: 'expired' });
+    throw new Error('Invitation has expired');
+  }
+  await docRef(db, recipientId, 'invitations', invitationId).update({ status: 'accepted', acceptedAt: new Date().toISOString() });
+  await docRef(db, recipientId, 'careTeam', user.id).set({
+    uid: user.id,
+    role: invitation.role,
+    status: 'active',
+    permissions: invitation.role === 'elder' ? 'full' : invitation.role === 'caregiver' ? 'medications + appointments + alerts' : 'view + alerts',
+    addedBy: invitation.invitedBy,
+    addedAt: new Date().toISOString(),
+    recipientId
+  });
+  return { id: user.id, role: invitation.role, status: 'active' };
+}
+
+export async function revokeInvitation(recipientId, invitationId) {
+  if (!useFirestore) throw new Error('Invitations require Firestore');
+  const db = getAdminDb();
+  await docRef(db, recipientId, 'invitations', invitationId).update({ status: 'revoked' });
+}
+
+export async function checkRecipientAccess(user, recipientId) {
+  if (!useFirestore) return true;
+  if (user?.source === 'local') return true;
+  const db = getAdminDb();
+  const snap = await docRef(db, recipientId, 'careTeam', user.id).get();
+  if (!snap.exists) return false;
+  const member = snap.data();
+  return member.status === 'active';
 }
 
 export function persistenceMode() { return useFirestore ? 'firestore' : 'demo-memory'; }
