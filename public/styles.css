@@ -622,6 +622,8 @@ textarea.input { min-height: 110px; resize: vertical; }
 }
 .judge-steps strong { display:block; margin-bottom:0.15rem; }
 .judge-steps p { color: var(--muted); font-size:0.95rem; }
+.judge-step-actions { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; justify-content:flex-end; }
+.button-compact { padding:0.65rem 1.2rem; font-size:1rem; }
 .rubric-list { display:grid; gap:0.85rem; }
 .rubric-list li { display:grid; gap:0.15rem; padding-bottom:0.85rem; border-bottom:1px solid var(--border); }
 .rubric-list li:last-child { border-bottom:0; padding-bottom:0; }
@@ -635,6 +637,7 @@ textarea.input { min-height: 110px; resize: vertical; }
 @media (max-width:640px) {
   .judge-steps li { grid-template-columns: 38px minmax(0,1fr); }
   .judge-steps li .button { grid-column: 2; justify-self:start; }
+  .judge-step-actions { grid-column: 2; justify-self:start; justify-content:flex-start; }
   .proof-grid { grid-template-columns:1fr; }
 }
 

@@ -623,7 +623,7 @@ function judgeTourView() {
         <ol class="judge-steps">
           <li><span>1</span><div><strong>Overview</strong><p>See the current care state and the next action immediately.</p></div><button class="button button-secondary" data-view="overview" aria-label="Open Overview">Open</button></li>
           <li><span>2</span><div><strong>Continuity</strong><p>See how CareMesh turns a signal into action, record and handoff.</p></div><button class="button button-secondary" data-view="continuity" aria-label="Open Continuity">Open</button></li>
-          <li><span>3</span><div><strong>Medication + appointments</strong><p>See the concrete workflows behind the coordination layer.</p></div><button class="button button-secondary" data-view="medications" aria-label="Open medications and appointments">Open</button></li>
+          <li><span>3</span><div><strong>Medication + appointments</strong><p>See the concrete workflows behind the coordination layer.</p></div><div class="judge-step-actions"><button class="button button-secondary button-compact" data-view="medications" aria-label="Open Medications">Medications</button><button class="button button-secondary button-compact" data-view="appointments" aria-label="Open Appointments">Appointments</button></div></li>
           <li><span>4</span><div><strong>Care Circle</strong><p>See who is involved and what each role can do.</p></div><button class="button button-secondary" data-view="care-team" aria-label="Open Care Circle">Open</button></li>
           <li><span>5</span><div><strong>Timeline</strong><p>Verify that the coordination loop leaves an auditable activity trail.</p></div><button class="button button-secondary" data-view="timeline" aria-label="Open Timeline">Open</button></li>
         </ol>
