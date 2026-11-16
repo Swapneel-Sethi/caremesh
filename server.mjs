@@ -122,6 +122,7 @@ async function api(req, res, url, deps = {}) {
   if (rateLimited(req)) return bad(res, 'Too many requests', 429);
 
   if (method === 'POST' && route === '/api/auth/login') {
+    return json(res, 200, { debug: 'handler reached', origin: req.headers.origin, referer: req.headers.referer });
     if (!validateOrigin(req)) return bad(res, 'Invalid origin', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
