@@ -121,8 +121,8 @@ async function api(req, res, url, deps = {}) {
 
   if (rateLimited(req)) return bad(res, 'Too many requests', 429);
 
-  if (method === 'POST' && route === '/api/auth/login') {
-    return json(res, 200, { debug: 'handler reached', origin: req.headers.origin, referer: req.headers.referer });
+  if ((method === 'GET' || method === 'POST') && route === '/api/auth/login') {
+    if (method === 'GET') return bad(res, 'Method not allowed', 405);
     if (!validateOrigin(req)) return bad(res, 'Invalid origin', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
@@ -134,7 +134,8 @@ async function api(req, res, url, deps = {}) {
     return json(res, 200, { user: sanitizeUser(user) }, { 'Set-Cookie': setCookie(sessionToken) });
   }
 
-  if (method === 'POST' && route === '/api/auth/firebase-login') {
+  if ((method === 'GET' || method === 'POST') && route === '/api/auth/firebase-login') {
+    if (method === 'GET') return bad(res, 'Method not allowed', 405);
     if (!validateOrigin(req)) return bad(res, 'Invalid origin', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
@@ -147,7 +148,8 @@ async function api(req, res, url, deps = {}) {
     return json(res, 200, { user: fbUser }, { 'Set-Cookie': setCookie(sessionToken) });
   }
 
-  if (method === 'POST' && route === '/api/auth/logout') {
+  if ((method === 'GET' || method === 'POST') && route === '/api/auth/logout') {
+    if (method === 'GET') return bad(res, 'Method not allowed', 405);
     return json(res, 200, { ok: true }, { 'Set-Cookie': `caremesh_session=; ${cookieFlags()}; Max-Age=0` });
   }
 
