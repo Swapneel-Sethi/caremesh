@@ -6,6 +6,7 @@ export const config = Object.freeze({
   port: Number(process.env.PORT || 8080),
   nodeEnv: process.env.NODE_ENV || 'development',
   appOrigin: process.env.APP_ORIGIN || 'https://caremesh-one.vercel.app',
+  vercelOrigin: process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '',
   sessionSecret: process.env.SESSION_SECRET || 'caremesh-dev-only-secret-change-me',
   googleProject: process.env.GOOGLE_CLOUD_PROJECT || '',
   googleLocation: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1',

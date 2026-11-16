@@ -232,3 +232,50 @@ test('origin validation accepts exact origin', async () => {
   await runHandler(handler, req, res);
   assert.equal(res.status, 200);
 });
+
+test('origin validation accepts production origin', async () => {
+  const handler = createHandler();
+  const req = makeReq('POST', '/api/auth/login', { role: 'elder', passcode: '1234' });
+  req.headers.origin = 'https://caremesh-one.vercel.app';
+  req.headers.referer = 'https://caremesh-one.vercel.app/';
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 200);
+});
+
+test('origin validation accepts vercel preview origin', async () => {
+  const origVercelUrl = process.env.VERCEL_URL;
+  process.env.VERCEL_URL = 'caremesh-cir35mwbw-foraipurposes7-6330s-projects.vercel.app';
+  const handler = createHandler();
+  const req = makeReq('POST', '/api/auth/login', { role: 'elder', passcode: '1234' });
+  req.headers.origin = 'https://caremesh-cir35mwbw-foraipurposes7-6330s-projects.vercel.app';
+  req.headers.referer = 'https://caremesh-cir35mwbw-foraipurposes7-6330s-projects.vercel.app/';
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 200);
+  if (origVercelUrl === undefined) {
+    delete process.env.VERCEL_URL;
+  } else {
+    process.env.VERCEL_URL = origVercelUrl;
+  }
+});
+
+test('origin validation rejects malicious vercel prefix', async () => {
+  const handler = createHandler();
+  const req = makeReq('POST', '/api/auth/login', { role: 'elder', passcode: '1234' });
+  req.headers.origin = 'https://caremesh-cir35mwbw-foraipurposes7-6330s-projects.vercel.app.attacker.com';
+  req.headers.referer = 'https://caremesh-cir35mwbw-foraipurposes7-6330s-projects.vercel.app.attacker.com/';
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 403);
+});
+
+test('origin validation rejects unrelated origin', async () => {
+  const handler = createHandler();
+  const req = makeReq('POST', '/api/auth/login', { role: 'elder', passcode: '1234' });
+  req.headers.origin = 'https://evil.example.com';
+  req.headers.referer = 'https://evil.example.com/';
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 403);
+});

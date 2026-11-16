@@ -86,7 +86,7 @@ function safeOutbox(outbox) {
   return (outbox || []).slice(0, 10).map(({ id, kind, subject, status, sentAt, providerStatus }) => ({ id, kind, subject, status, sentAt, providerStatus }));
 }
 
-function validateOrigin(req, allowed = [config.appOrigin, 'http://localhost:8080', 'http://127.0.0.1:8080']) {
+function validateOrigin(req, allowed = [config.appOrigin, config.vercelOrigin, 'https://caremesh-one.vercel.app', 'http://localhost:8080', 'http://127.0.0.1:8080'].filter(Boolean)) {
   const origin = req.headers.origin || req.headers.referer || '';
   if (!origin) return false;
   try {
