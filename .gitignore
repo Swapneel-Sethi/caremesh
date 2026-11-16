@@ -8,6 +8,7 @@ coverage/
 data/runtime.json
 caremesh/
 .vercel
+.firebase/
 
 .vercel
 .env*

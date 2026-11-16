@@ -1,0 +1,15 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // CareMesh is server-mediated:
+    //   Browser -> CareMesh backend -> Firebase Admin SDK -> Firestore
+    //
+    // The backend is the only writer and the only authorization boundary.
+    // Browsers never read or write Firestore directly, so all client SDK
+    // access is denied by default. The Admin SDK bypasses these rules.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
