@@ -34,9 +34,9 @@ function makeRes() {
     get status() { return status; },
     get headers() { return resHeaders; },
     get body() { return JSON.parse(Buffer.concat(chunks).toString() || '{}'); },
-    get setCookie() { 
+    get setCookie() {
       const cookie = resHeaders['Set-Cookie'] || resHeaders['set-cookie'];
-      return Array.isArray(cookie) ? cookie.join('; ') : (cookie || ''); 
+      return Array.isArray(cookie) ? cookie.join('; ') : (cookie || '');
     }
   };
   return res;
@@ -126,4 +126,46 @@ test('caregiver can access reminders', async () => {
   const res = makeRes();
   await runHandler(handler, req, res);
   assert.equal(res.status, 200);
+});
+
+test('existing family user preserves role and status', async () => {
+  const handler = createHandler({
+    firebaseLogin: async ({ idToken }) => {
+      return {
+        status: 200,
+        body: {
+          user: {
+            uid: 'existing-family-uid',
+            email: 'family@example.com',
+            displayName: 'Existing Family',
+            role: 'family',
+            status: 'active'
+          }
+        }
+      };
+    },
+    resolveUser: async (uid) => {
+      if (uid === 'existing-family-uid') {
+        return { id: 'existing-family-uid', name: 'Existing Family', role: 'family', status: 'active', email: 'family@example.com', initials: 'EF' };
+      }
+      return null;
+    }
+  });
+  const req = makeReq('POST', '/api/auth/firebase-login', { idToken: 'fake-token' });
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.user.role, 'family');
+  assert.equal(res.body.user.status, 'active');
+
+  const dashboardReq = makeReq('GET', '/api/dashboard', null, makeSessionCookie('existing-family-uid'));
+  const dashboardRes = makeRes();
+  await runHandler(handler, dashboardReq, dashboardRes);
+  assert.equal(dashboardRes.status, 200);
+  assert.equal(dashboardRes.body.user.role, 'family');
+
+  const writeReq = makeReq('POST', '/api/medications', { name: 'Test', schedule: '08:00' }, makeSessionCookie('existing-family-uid'));
+  const writeRes = makeRes();
+  await runHandler(handler, writeReq, writeRes);
+  assert.equal(writeRes.status, 403);
 });

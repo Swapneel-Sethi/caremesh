@@ -36,13 +36,11 @@ export async function getOrCreateUser(uid, { email, displayName }) {
     return data;
   }
   const existing = snap.data();
-  const role = safeRole(existing.role);
-  const status = safeStatus(role);
   const updates = {
     email: email ?? existing.email,
     displayName: displayName ?? existing.displayName,
-    role,
-    status,
+    role: existing.role,
+    status: existing.status,
     updatedAt: now,
     lastSignInAt: now
   };
