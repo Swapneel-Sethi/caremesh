@@ -10,9 +10,10 @@
     "lint": "node scripts/lint.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "20.x"
   },
   "dependencies": {
-    "firebase-admin": "^14.5.1"
+    "firebase-admin": "^14.5.1",
+    "googleapis": "^190.0.0"
   }
 }
