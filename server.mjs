@@ -9,9 +9,10 @@ import { createSession, readSession, verifyPasscode } from './src/security.mjs';
 import { validateMedication, validateAppointment } from './src/validation.mjs';
 import { generateCareBrief } from './src/google.mjs';
 import { previewReminders, runReminders } from './src/reminders.mjs';
-import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdate, persistAppointment, persistenceMode, createInvitation, getInvitation, getInvitationsByRecipient, acceptInvitation, revokeInvitation, checkRecipientAccess, addCareTeamMember, removeCareTeamMember, getCareTeamMembers } from './src/store.mjs';
+import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdate, persistAppointment, persistenceMode, createInvitation, getInvitation, getInvitationsByRecipient, acceptInvitation, revokeInvitation, checkRecipientAccess, addCareTeamMember, removeCareTeamMember, getCareTeamMembers, canViewRecipient, canMutateRecipient, isPending, getUserRecipientId } from './src/store.mjs';
+const DEMO_RECIPIENT_ID = 'demo-recipient';
 import { firebaseLogin } from './src/firebase-login.mjs';
-import { resolveSessionUser, isPending, canAccessRecipient } from './src/identity.mjs';
+import { resolveSessionUser } from './src/identity.mjs';
 
 const publicDir = path.resolve('public');
 const limiter = new Map();
@@ -85,10 +86,18 @@ function safeOutbox(outbox) {
   return (outbox || []).slice(0, 10).map(({ id, kind, subject, status, sentAt, providerStatus }) => ({ id, kind, subject, status, sentAt, providerStatus }));
 }
 
-function validateOrigin(req, allowed = [config.appOrigin]) {
+function validateOrigin(req, allowed = [config.appOrigin, 'http://localhost:8080', 'http://127.0.0.1:8080']) {
   const origin = req.headers.origin || req.headers.referer || '';
-  if (config.nodeEnv === 'test') return true;
-  return allowed.some(o => origin.startsWith(o));
+  if (!origin) return false;
+  try {
+    const originUrl = new URL(origin);
+    return allowed.some(o => {
+      try {
+        const allowedUrl = new URL(o);
+        return originUrl.hostname === allowedUrl.hostname && originUrl.protocol === allowedUrl.protocol && originUrl.port === allowedUrl.port;
+      } catch { return false; }
+    });
+  } catch { return false; }
 }
 
 async function api(req, res, url, deps = {}) {
@@ -172,6 +181,7 @@ async function api(req, res, url, deps = {}) {
     if (isPending(user)) {
       return json(res, 200, { pending: true, user: sanitizeUser(user) });
     }
+    if (!canViewRecipient(user)) return bad(res, 'No recipient assigned', 403);
     let state;
     try {
       state = await domainSnapshot(user);
@@ -184,23 +194,39 @@ async function api(req, res, url, deps = {}) {
     return json(res, 200, { user: sanitizeUser(user), profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam, events: state.events, outbox: safeOutbox(state.outbox), careBrief });
   }
 
-  const user = await getUser();
-  if (!user) return bad(res, 'Authentication required', 401);
-  const recipientId = user?.source === 'local' ? 'demo-recipient' : 'demo-recipient';
-
   const invMatch = route.match(/^\/api\/invitations\/([^/]+)\/accept$/);
   if (method === 'POST' && invMatch) {
+    const authUser = await getUser();
+    if (!authUser) return bad(res, 'Authentication required', 401);
+    let recipientId;
+    if (authUser.source === 'local') {
+      recipientId = DEMO_RECIPIENT_ID;
+    } else {
+      recipientId = await getUserRecipientId(authUser.id);
+      if (!recipientId) return bad(res, 'No recipient assigned', 403);
+    }
     try {
-      const membership = await acceptInvitation(user, recipientId, invMatch[1]);
-      await persistEvent(user, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Invitation accepted', actor: user.name, type: 'security', detail: `Joined care circle as ${membership.role}` });
+      const membership = await acceptInvitation(authUser, recipientId, invMatch[1]);
+      await persistEvent(authUser, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Invitation accepted', actor: authUser.name, type: 'security', detail: `Joined care circle as ${membership.role}` });
       return json(res, 200, { membership });
     } catch (error) { return bad(res, error.message, 400); }
   }
 
-  if (!canAccessRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+  const user = await getUser();
+  if (!user) return bad(res, 'Authentication required', 401);
+  let recipientId;
+  if (user.source === 'local') {
+    recipientId = DEMO_RECIPIENT_ID;
+  } else {
+    recipientId = await getUserRecipientId(user.id);
+    if (!recipientId) return bad(res, 'No recipient assigned', 403);
+  }
+
+  if (!canViewRecipient(user)) return bad(res, 'No recipient access', 403);
   if (!(await checkRecipientAccess(user, recipientId))) return bad(res, 'No access to this care recipient', 403);
 
   if (method === 'POST' && route === '/api/medications') {
+    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
     let input;
     try { input = validateMedication(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
     const med = await persistMedication(user, input);
@@ -210,6 +236,7 @@ async function api(req, res, url, deps = {}) {
 
   const medMatch = route.match(/^\/api\/medications\/([^/]+)$/);
   if (method === 'PATCH' && medMatch) {
+    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
     const allowed = {};
@@ -223,6 +250,7 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'POST' && route === '/api/appointments') {
+    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
     let input;
     try { input = validateAppointment(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
     const appointment = await persistAppointment(user, input);
@@ -231,17 +259,19 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'POST' && route === '/api/reminders/preview') {
+    if (!canViewRecipient(user)) return bad(res, 'No recipient access', 403);
     const candidates = await previewReminders({ user });
     return json(res, 200, { candidates, checkedAt: new Date().toISOString(), timeZone: config.reminderTimeZone });
   }
 
   if (method === 'POST' && route === '/api/reminders/run') {
+    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
     const result = await runReminders({ actor: user.name, user });
     return json(res, 200, result);
   }
 
   if (method === 'POST' && route === '/api/invitations') {
-    if (!canAccessRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
     const { invitedUid, role, expiresAt } = input;
@@ -256,7 +286,7 @@ async function api(req, res, url, deps = {}) {
 
   const invRevokeMatch = route.match(/^\/api\/invitations\/([^/]+)\/revoke$/);
   if (method === 'POST' && invRevokeMatch) {
-    if (!canAccessRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
     try {
       await revokeInvitation(recipientId, invRevokeMatch[1]);
       return json(res, 200, { ok: true });
@@ -264,6 +294,7 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'GET' && route === '/api/invitations') {
+    if (!canViewRecipient(user)) return bad(res, 'No recipient access', 403);
     try {
       const invitations = await getInvitationsByRecipient(recipientId);
       return json(res, 200, { invitations });
@@ -271,6 +302,7 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'POST' && route === '/api/care-brief') {
+    if (!canViewRecipient(user)) return bad(res, 'No recipient access', 403);
     try {
       const state = await domainSnapshot(user);
       const careBrief = await generateCareBrief({ profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam });

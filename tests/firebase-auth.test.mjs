@@ -113,7 +113,7 @@ test('logout clears session cookie', async () => {
 });
 
 test('family role still gets 403 for mutations', async () => {
-  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-family', name: 'Family', role: 'family', status: 'active', email: 'family@example.com', initials: 'FA' }) });
+  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-family', name: 'Family', role: 'family', status: 'active', email: 'family@example.com', initials: 'FA', recipientId: 'demo-recipient' }) });
   const req = makeReq('POST', '/api/medications', { name: 'Test', schedule: '08:00' }, makeSessionCookie('usr-family'));
   const res = makeRes();
   await runHandler(handler, req, res);
@@ -121,7 +121,7 @@ test('family role still gets 403 for mutations', async () => {
 });
 
 test('caregiver can access reminders', async () => {
-  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-caregiver', name: 'Caregiver', role: 'caregiver', status: 'active', email: 'cg@example.com', initials: 'CG' }) });
+  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-caregiver', name: 'Caregiver', role: 'caregiver', status: 'active', email: 'cg@example.com', initials: 'CG', source: 'local', recipientId: 'demo-recipient' }) });
   const req = makeReq('POST', '/api/reminders/preview', {}, makeSessionCookie('usr-caregiver'));
   const res = makeRes();
   await runHandler(handler, req, res);
@@ -139,14 +139,15 @@ test('existing family user preserves role and status', async () => {
             email: 'family@example.com',
             displayName: 'Existing Family',
             role: 'family',
-            status: 'active'
+            status: 'active',
+            recipientId: 'demo-recipient'
           }
         }
       };
     },
     resolveUser: async (uid) => {
       if (uid === 'existing-family-uid') {
-        return { id: 'existing-family-uid', name: 'Existing Family', role: 'family', status: 'active', email: 'family@example.com', initials: 'EF' };
+        return { id: 'existing-family-uid', name: 'Existing Family', role: 'family', status: 'active', email: 'family@example.com', initials: 'EF', recipientId: 'demo-recipient' };
       }
       return null;
     }
@@ -171,7 +172,7 @@ test('existing family user preserves role and status', async () => {
 });
 
 test('invitation creation rejects missing invitedUid', async () => {
-  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-elder', name: 'Elder', role: 'elder', status: 'active', email: 'e@example.com', initials: 'ER', source: 'local' }) });
+  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-elder', name: 'Elder', role: 'elder', status: 'active', email: 'e@example.com', initials: 'ER', source: 'local', recipientId: 'demo-recipient' }) });
   const req = makeReq('POST', '/api/invitations', { role: 'family' }, makeSessionCookie('usr-elder'));
   const res = makeRes();
   await runHandler(handler, req, res);
@@ -179,7 +180,7 @@ test('invitation creation rejects missing invitedUid', async () => {
 });
 
 test('invitation creation rejects invalid role', async () => {
-  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-elder', name: 'Elder', role: 'elder', status: 'active', email: 'e@example.com', initials: 'ER', source: 'local' }) });
+  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-elder', name: 'Elder', role: 'elder', status: 'active', email: 'e@example.com', initials: 'ER', source: 'local', recipientId: 'demo-recipient' }) });
   const req = makeReq('POST', '/api/invitations', { invitedUid: 'new-user', role: 'admin' }, makeSessionCookie('usr-elder'));
   const res = makeRes();
   await runHandler(handler, req, res);
@@ -187,7 +188,7 @@ test('invitation creation rejects invalid role', async () => {
 });
 
 test('invitation creation rejected for family role', async () => {
-  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-family', name: 'Family', role: 'family', status: 'active', email: 'f@example.com', initials: 'FA', source: 'local' }) });
+  const handler = createHandler({ resolveUser: async () => ({ id: 'usr-family', name: 'Family', role: 'family', status: 'active', email: 'f@example.com', initials: 'FA', source: 'local', recipientId: 'demo-recipient' }) });
   const req = makeReq('POST', '/api/invitations', { invitedUid: 'new-user', role: 'family' }, makeSessionCookie('usr-family'));
   const res = makeRes();
   await runHandler(handler, req, res);
@@ -195,9 +196,39 @@ test('invitation creation rejected for family role', async () => {
 });
 
 test('invitation acceptance requires Firestore', async () => {
-  const handler = createHandler({ resolveUser: async () => ({ id: 'new-user', name: 'New User', role: 'pending', status: 'pending', email: 'n@example.com', initials: 'NU', source: 'local' }) });
+  const handler = createHandler({ resolveUser: async () => ({ id: 'new-user', name: 'New User', role: 'pending', status: 'pending', email: 'n@example.com', initials: 'NU', source: 'local', recipientId: 'demo-recipient' }) });
   const req = makeReq('POST', '/api/invitations/inv-123/accept', {}, makeSessionCookie('new-user'));
   const res = makeRes();
   await runHandler(handler, req, res);
   assert.equal(res.status, 400);
+});
+
+test('IDOR prevention blocks Firebase user without recipient', async () => {
+  const handler = createHandler({
+    resolveUser: async () => ({ id: 'fb-user-no-recipient', name: 'No Recipient', role: 'elder', status: 'active', email: 'n@example.com', initials: 'NR', source: 'firebase' })
+  });
+  const req = makeReq('POST', '/api/medications', { name: 'Test', schedule: '08:00' }, makeSessionCookie('fb-user-no-recipient'));
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 403);
+});
+
+test('origin validation rejects malicious prefix', async () => {
+  const handler = createHandler();
+  const req = makeReq('POST', '/api/auth/login', { role: 'elder', passcode: '1234' });
+  req.headers.origin = 'https://caremesh-one.vercel.app.attacker.com';
+  req.headers.referer = 'https://caremesh-one.vercel.app.attacker.com/';
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 403);
+});
+
+test('origin validation accepts exact origin', async () => {
+  const handler = createHandler();
+  const req = makeReq('POST', '/api/auth/login', { role: 'elder', passcode: '1234' });
+  req.headers.origin = 'http://localhost:8080';
+  req.headers.referer = 'http://localhost:8080/';
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 200);
 });

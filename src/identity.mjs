@@ -7,7 +7,7 @@ export async function resolveSessionUser(uid, localUsers) {
   if (!isFirebaseAdminReady()) return null;
   try {
     const firebase = await getUserByUid(uid);
-    if (firebase) return { id: firebase.uid, email: firebase.email, name: firebase.displayName, role: firebase.role, status: firebase.status, initials: firebase.displayName?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || '??', source: 'firebase' };
+    if (firebase) return { id: firebase.uid, email: firebase.email, name: firebase.displayName, role: firebase.role, status: firebase.status, recipientId: firebase.recipientId, initials: firebase.displayName?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || '??', source: 'firebase' };
   } catch { /* ignore */ }
   return null;
 }

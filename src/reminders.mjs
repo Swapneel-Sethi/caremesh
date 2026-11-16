@@ -1,5 +1,5 @@
 import { config } from './config.mjs';
-import { domainSnapshot, persistEvent, persistReminder, reminderKeys } from './store.mjs';
+import { domainSnapshot, persistEvent, persistReminder, checkReminderExists } from './store.mjs';
 import { sendReminder } from './email.mjs';
 import { clockLabel, dateLong, dayOffset, localParts, scheduleLabel, timeToMinutes } from './time.mjs';
 
@@ -143,21 +143,23 @@ function eventTitle(kind, status) {
 
 export async function previewReminders({ now = new Date(), snapshot, user } = {}) {
   const state = snapshot || await domainSnapshot(user);
-  const existing = await reminderKeys(user);
-  return buildReminderCandidates(state, now).map((candidate) => ({
-    ...candidate.summary,
-    subject: candidate.subject,
-    duplicate: existing.has(candidate.key)
+  return Promise.all(buildReminderCandidates(state, now).map(async (candidate) => {
+    const duplicate = await checkReminderExists(user, candidate.key);
+    return {
+      ...candidate.summary,
+      subject: candidate.subject,
+      duplicate
+    };
   }));
 }
 
 export async function runReminders({ actor = 'CarePulse', now = new Date(), snapshot, user } = {}) {
   const state = snapshot || await domainSnapshot(user);
-  const existing = await reminderKeys(user);
   const results = [];
 
   for (const candidate of buildReminderCandidates(state, now)) {
-    if (existing.has(candidate.key)) {
+    const duplicate = await checkReminderExists(user, candidate.key);
+    if (duplicate) {
       results.push({ ...candidate.summary, status: 'duplicate', delivered: false });
       continue;
     }
@@ -172,7 +174,6 @@ export async function runReminders({ actor = 'CarePulse', now = new Date(), snap
 
     if (delivery.status === 'sent' || delivery.status === 'preview') {
       await persistReminder(user, { key: candidate.key, kind: candidate.kind, status: delivery.status, at: now.toISOString() });
-      existing.add(candidate.key);
     }
 
     await persistEvent(user, {

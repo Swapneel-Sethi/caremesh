@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import { hashPasscode } from './security.mjs';
 
 const users = [
-  { id: 'usr-elder', name: 'Meera Rao', role: 'elder', initials: 'MR', email: 'meera.demo@example.com', passcode: '1234', status: 'active' },
-  { id: 'usr-caregiver', name: 'Priya Shah', role: 'caregiver', initials: 'PS', email: 'priya.demo@example.com', passcode: '2468', status: 'active' },
-  { id: 'usr-family', name: 'Arjun Rao', role: 'family', initials: 'AR', email: 'arjun.demo@example.com', passcode: '1357', status: 'active' }
+  { id: 'usr-elder', name: 'Meera Rao', role: 'elder', initials: 'MR', email: 'meera.demo@example.com', passcode: '1234', status: 'active', recipientId: 'demo-recipient' },
+  { id: 'usr-caregiver', name: 'Priya Shah', role: 'caregiver', initials: 'PS', email: 'priya.demo@example.com', passcode: '2468', status: 'active', recipientId: 'demo-recipient' },
+  { id: 'usr-family', name: 'Arjun Rao', role: 'family', initials: 'AR', email: 'arjun.demo@example.com', passcode: '1357', status: 'active', recipientId: 'demo-recipient' }
 ].map((user) => {
   const { passcode, ...rest } = user;
   const credential = hashPasscode(passcode, `caremesh-${user.id}`);
