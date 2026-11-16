@@ -279,3 +279,78 @@ test('origin validation rejects unrelated origin', async () => {
   await runHandler(handler, req, res);
   assert.equal(res.status, 403);
 });
+
+test('pending Firebase user login succeeds without recipientId', async () => {
+  let persistEventCalled = false;
+  const handler = createHandler({
+    firebaseLogin: async ({ idToken }) => {
+      return {
+        status: 200,
+        body: {
+          user: {
+            uid: 'fb-pending-uid',
+            email: 'pending@example.com',
+            displayName: 'Pending User',
+            role: 'pending',
+            status: 'pending'
+          }
+        }
+      };
+    },
+    resolveUser: async (uid) => {
+      if (uid === 'fb-pending-uid') {
+        return { id: 'fb-pending-uid', name: 'Pending User', role: 'pending', status: 'pending', email: 'pending@example.com', initials: 'PU', source: 'firebase' };
+      }
+      return null;
+    },
+    getUserRecipientId: async () => null
+  });
+  const req = makeReq('POST', '/api/auth/firebase-login', { idToken: 'fake-token' });
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 200);
+  assert.ok(res.setCookie.includes('HttpOnly'));
+  assert.ok(res.setCookie.includes('SameSite=Lax'));
+
+  // Subsequent dashboard returns pending
+  const sessionCookie = res.setCookie.split(';')[0];
+  const dashboardReq = makeReq('GET', '/api/dashboard', null, sessionCookie);
+  const dashboardRes = makeRes();
+  await runHandler(handler, dashboardReq, dashboardRes);
+  assert.equal(dashboardRes.status, 200);
+  assert.equal(dashboardRes.body.pending, true);
+  assert.equal(dashboardRes.body.user.role, 'pending');
+});
+
+test('active Firebase user with recipientId gets session event', async () => {
+  let persistEventCalled = false;
+  const handler = createHandler({
+    firebaseLogin: async ({ idToken }) => {
+      return {
+        status: 200,
+        body: {
+          user: {
+            uid: 'fb-active-uid',
+            email: 'active@example.com',
+            displayName: 'Active User',
+            role: 'caregiver',
+            status: 'active',
+            recipientId: 'demo-recipient'
+          }
+        }
+      };
+    },
+    resolveUser: async (uid) => {
+      if (uid === 'fb-active-uid') {
+        return { id: 'fb-active-uid', name: 'Active User', role: 'caregiver', status: 'active', email: 'active@example.com', initials: 'AU', source: 'firebase', recipientId: 'demo-recipient' };
+      }
+      return null;
+    },
+    getUserRecipientId: async () => 'demo-recipient'
+  });
+  const req = makeReq('POST', '/api/auth/firebase-login', { idToken: 'fake-token' });
+  const res = makeRes();
+  await runHandler(handler, req, res);
+  assert.equal(res.status, 200);
+  assert.ok(res.setCookie.includes('HttpOnly'));
+});

@@ -154,7 +154,20 @@ async function api(req, res, url, deps = {}) {
     const fbUser = result.body.user;
     if (!fbUser || !fbUser.uid) return json(res, 500, { error: 'User provisioning failed' });
     const sessionToken = createSession(fbUser.uid, config.sessionSecret);
-    await persistEvent({ id: fbUser.uid, name: fbUser.displayName || fbUser.email, role: fbUser.role || 'pending', status: fbUser.status || 'pending', source: 'firebase' }, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Firebase session created', actor: fbUser.displayName || fbUser.email, type: 'security', detail: `Firebase Google login` });
+    const fbRecipientId = await getUserRecipientId(fbUser.uid);
+    if (fbRecipientId) {
+      await persistEvent(
+        {
+          id: fbUser.uid,
+          name: fbUser.displayName || fbUser.email,
+          role: fbUser.role || 'pending',
+          status: fbUser.status || 'pending',
+          source: 'firebase',
+          recipientId: fbRecipientId
+        },
+        { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), title: 'Firebase session created', actor: fbUser.displayName || fbUser.email, type: 'security', detail: `Firebase Google login` }
+      );
+    }
     return json(res, 200, { user: fbUser }, { 'Set-Cookie': setCookie(sessionToken) });
   }
 
