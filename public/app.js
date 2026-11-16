@@ -587,48 +587,123 @@ function timelineView() {
 
 
 function judgeTourView() {
-  return pageHead('Judge Tour', 'A 60-second path through the product, mapped to the criteria that matter in an innovation hackathon.') +
-    '<div class="stack">' +
-      '<section class="card judge-hero">' +
-        '<p class="eyebrow">CareMesh in one sentence</p>' +
-        '<h2>Care coordination, not another reminder app.</h2>' +
-        '<p class="lead">CareMesh connects daily care signals, next actions, trusted people, and an auditable timeline into one shared care system.</p>' +
-      '</section>' +
-      '<section class="card" aria-labelledby="tour-steps-title">' +
-        '<div class="card-head"><h2 id="tour-steps-title">The 60-second judge path</h2><span class="chip chip-neutral">5 stops</span></div>' +
-        '<ol class="judge-steps">' +
-          '<li><span>1</span><div><strong>Overview</strong><p>See the current care state and priority queue immediately.</p></div><button class="button button-secondary" data-view="overview">Open</button></li>' +
-          '<li><span>2</span><div><strong>Continuity</strong><p>See CarePulse turn a signal into an action, record and handoff.</p></div><button class="button button-secondary" data-view="continuity">Open</button></li>' +
-          '<li><span>3</span><div><strong>Medication + appointments</strong><p>Show that the system manages concrete care workflows, not just a dashboard.</p></div><button class="button button-secondary" data-view="medications">Open</button></li>' +
-          '<li><span>4</span><div><strong>Care Circle</strong><p>Show role-aware access and shared context for elder, caregiver and family.</p></div><button class="button button-secondary" data-view="care-team">Open</button></li>' +
-          '<li><span>5</span><div><strong>Timeline</strong><p>Close the loop with a visible activity record.</p></div><button class="button button-secondary" data-view="timeline">Open</button></li>' +
-        '</ol>' +
-      '</section>' +
-      '<div class="cols">' +
-        '<section class="card" aria-labelledby="rubric-title">' +
-          '<div class="card-head"><h2 id="rubric-title">Why it scores</h2><span class="chip chip-ok">FLARE fit</span></div>' +
-          '<ul class="rubric-list">' +
-            '<li><strong>Innovation</strong><span>Care continuity is the differentiator: signal → action → record → handoff.</span></li>' +
-            '<li><strong>Technical execution</strong><span>Role-aware session auth, server-side authorization, reminder engine, email adapter and audit timeline.</span></li>' +
-            '<li><strong>Feasibility</strong><span>Simple workflows that can evolve from demo-memory to persistent production storage without redesigning the product.</span></li>' +
-            '<li><strong>Impact</strong><span>Designed for the human coordination gap between an older adult, caregiver and family.</span></li>' +
-          '</ul>' +
-        '</section>' +
-        '<section class="card" aria-labelledby="architecture-proof-title">' +
-          '<div class="card-head"><h2 id="architecture-proof-title">Architecture proof</h2><span class="chip chip-neutral">Under the hood</span></div>' +
-          '<div class="proof-grid">' +
-            '<div><strong>Security</strong><p>Signed session cookie + role gates + security headers.</p></div>' +
-            '<div><strong>Automation</strong><p>Deduplicated reminder workflow with protected cron support.</p></div>' +
-            '<div><strong>AI layer</strong><p>Structured care brief with a deterministic fallback.</p></div>' +
-            '<div><strong>Auditability</strong><p>Medication, appointment and access actions appear in Timeline.</p></div>' +
-          '</div>' +
-        '</section>' +
-      '</div>' +
-      '<section class="card judge-note">' +
-        '<div class="card-head"><h2>Demo tip</h2><span class="chip chip-neutral">Recommended order</span></div>' +
-        '<p class="lead"><strong>Overview → Continuity → Care Circle → Timeline.</strong> The story should feel like one care thread rather than five disconnected screens.</p>' +
-      '</section>' +
-    '</div>';
+  return pageHead('Judge Tour', 'A 60-second path through the product, mapped to the criteria that matter in an innovation hackathon.') + `
+    <div class="stack">
+      <section class="card judge-hero">
+        <p class="eyebrow">CareMesh in one sentence</p>
+        <h2>Care coordination, not another reminder app.</h2>
+        <p class="lead">CareMesh connects daily care signals, next actions, trusted people, and an auditable timeline into one shared care system.</p>
+      </section>
+      <section class="card gap-card" aria-labelledby="gap-title">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">The problem, in one frame</p>
+            <h2 id="gap-title">The coordination gap</h2>
+          </div>
+          <span class="chip chip-neutral">Why CareMesh exists</span>
+        </div>
+        <div class="gap-grid">
+          <div class="gap-step">
+            <span class="gap-label">Problem</span>
+            <p>Care for an older adult is rarely one task. Medication reminders, appointments, caregiver updates and family communication are often fragmented across different places.</p>
+          </div>
+          <div class="gap-step">
+            <span class="gap-label">Insight</span>
+            <p>A reminder tells someone what to do. It does not automatically coordinate what happens next.</p>
+          </div>
+          <div class="gap-step gap-step-solution">
+            <span class="gap-label">Solution</span>
+            <p>CareMesh turns a care signal into a coordinated thread: <strong>signal → action → record → handoff.</strong></p>
+          </div>
+        </div>
+      </section>
+      <section class="card" aria-labelledby="tour-steps-title">
+        <div class="card-head"><h2 id="tour-steps-title">The 60-second judge path</h2><span class="chip chip-neutral">5 stops</span></div>
+        <p class="judge-path-note">Follow one care thread instead of exploring the app randomly.</p>
+        <ol class="judge-steps">
+          <li><span>1</span><div><strong>Overview</strong><p>See the current care state and the next action immediately.</p></div><button class="button button-secondary" data-view="overview" aria-label="Open Overview">Open</button></li>
+          <li><span>2</span><div><strong>Continuity</strong><p>See how CareMesh turns a signal into action, record and handoff.</p></div><button class="button button-secondary" data-view="continuity" aria-label="Open Continuity">Open</button></li>
+          <li><span>3</span><div><strong>Medication + appointments</strong><p>See the concrete workflows behind the coordination layer.</p></div><button class="button button-secondary" data-view="medications" aria-label="Open medications and appointments">Open</button></li>
+          <li><span>4</span><div><strong>Care Circle</strong><p>See who is involved and what each role can do.</p></div><button class="button button-secondary" data-view="care-team" aria-label="Open Care Circle">Open</button></li>
+          <li><span>5</span><div><strong>Timeline</strong><p>Verify that the coordination loop leaves an auditable activity trail.</p></div><button class="button button-secondary" data-view="timeline" aria-label="Open Timeline">Open</button></li>
+        </ol>
+      </section>
+      <section class="judge-section" aria-labelledby="diff-title">
+        <div class="card-head"><h2 id="diff-title">What makes CareMesh different</h2><span class="chip chip-ok">Beyond reminders</span></div>
+        <div class="diff-grid">
+          <article class="card diff-card diff-continuity">
+            <span class="diff-index" aria-hidden="true">01</span>
+            <h3>Continuity</h3>
+            <p>CareMesh does not stop at reminders. It connects the event to the next action and the people responsible for continuity.</p>
+          </article>
+          <article class="card diff-card diff-circle">
+            <span class="diff-index" aria-hidden="true">02</span>
+            <h3>Care Circle</h3>
+            <p>Elder, caregiver and family see the same care context with role-aware permissions.</p>
+          </article>
+          <article class="card diff-card diff-record">
+            <span class="diff-index" aria-hidden="true">03</span>
+            <h3>Visible record</h3>
+            <p>Timeline makes coordination activity visible instead of leaving important context inside private conversations.</p>
+          </article>
+        </div>
+      </section>
+      <section class="card compare-card" aria-labelledby="compare-title">
+        <div class="card-head">
+          <h2 id="compare-title">From fragmented care <span aria-hidden="true">→</span><span class="sr-only">to</span> connected care</h2>
+          <span class="chip chip-neutral">Product model</span>
+        </div>
+        <div class="compare-grid">
+          <div class="compare-side compare-before">
+            <h3>Before CareMesh</h3>
+            <ul class="compare-list">
+              <li>Reminder</li>
+              <li>Calendar</li>
+              <li>Phone call</li>
+              <li>Family message</li>
+              <li>Information scattered</li>
+            </ul>
+          </div>
+          <div class="compare-arrow" aria-hidden="true">→</div>
+          <div class="compare-side compare-after">
+            <h3>With CareMesh</h3>
+            <ul class="compare-list">
+              <li>Signal</li>
+              <li>Action</li>
+              <li>Care circle</li>
+              <li>Timeline</li>
+              <li>Handoff</li>
+            </ul>
+          </div>
+        </div>
+        <p class="helper">A visualization of the coordination model, not a measured outcome.</p>
+      </section>
+      <div class="cols">
+        <section class="card" aria-labelledby="rubric-title">
+          <div class="card-head"><h2 id="rubric-title">Why it scores</h2><span class="chip chip-ok">FLARE fit</span></div>
+          <ul class="rubric-list">
+            <li><strong>Innovation</strong><span>Care continuity is the differentiator: signal → action → record → handoff.</span></li>
+            <li><strong>Technical execution</strong><span>Role-aware session auth, server-side authorization, reminder engine, email adapter and audit timeline.</span></li>
+            <li><strong>Feasibility</strong><span>Simple workflows that can evolve from demo-memory to persistent production storage without redesigning the product.</span></li>
+            <li><strong>Impact</strong><span>Designed for the human coordination gap between an older adult, caregiver and family.</span></li>
+          </ul>
+        </section>
+        <section class="card" aria-labelledby="architecture-proof-title">
+          <div class="card-head"><h2 id="architecture-proof-title">Architecture proof</h2><span class="chip chip-neutral">Under the hood</span></div>
+          <div class="proof-grid">
+            <div><strong>Security</strong><p>Signed session cookie + role gates + security headers.</p></div>
+            <div><strong>Automation</strong><p>Deduplicated reminder workflow with protected cron support.</p></div>
+            <div><strong>AI layer</strong><p>Structured care brief with a deterministic fallback.</p></div>
+            <div><strong>Auditability</strong><p>Medication, appointment and access actions appear in Timeline.</p></div>
+            <div class="proof-resilience"><strong>Demo resilience</strong><p>Core workflows remain usable with a deterministic AI fallback and demo-memory persistence, so the product still functions when optional services are unavailable.</p></div>
+          </div>
+        </section>
+      </div>
+      <section class="card judge-note">
+        <div class="card-head"><h2>Demo tip</h2><span class="chip chip-neutral">Recommended order</span></div>
+        <p class="lead"><strong>Overview → Continuity → Care Circle → Timeline.</strong> The story should feel like one care thread rather than five disconnected screens.</p>
+      </section>
+    </div>`;
 }
 
 function bindInteractions() {
