@@ -18,12 +18,14 @@ const roleCopy = {
 };
 const views = [
   ['overview', 'Overview'],
+  ['continuity', 'Continuity'],
+  ['judge-tour', 'Judge Tour'],
   ['medications', 'Medications'],
   ['appointments', 'Appointments'],
   ['care-team', 'Care Circle'],
   ['timeline', 'Timeline']
 ];
-const viewTitles = { overview: 'Overview', medications: 'Medications', appointments: 'Appointments', 'care-team': 'Care Circle', timeline: 'Timeline' };
+const viewTitles = { overview: 'Overview', continuity: 'Continuity', 'judge-tour': 'Judge Tour', medications: 'Medications', appointments: 'Appointments', 'care-team': 'Care Circle', timeline: 'Timeline' };
 
 function viewFromHash() {
   const id = location.hash.replace('#', '');
@@ -173,25 +175,207 @@ function viewMarkup(view) {
   if (view === 'appointments') return appointmentsView();
   if (view === 'care-team') return careTeamView();
   if (view === 'timeline') return timelineView();
+  if (view === 'continuity') return continuityView();
+  if (view === 'judge-tour') return judgeTourView();
   return overviewView();
+}
+
+
+function coordinationState() {
+  const medications = dashboard.medications || [];
+  const taken = medications.filter((medication) => medication.status === 'taken').length;
+  const missed = medications.filter((medication) => medication.status === 'missed');
+  const overdue = medications.filter((medication) => medication.status === 'pending' && dueDate(medication.schedule) < new Date());
+  const pending = medications.filter((medication) => medication.status === 'pending' && !overdue.some((item) => item.id === medication.id));
+  const appointment = nextAppointment();
+  let tone = 'ok';
+  let status = 'On track';
+  let signal = 'No open care signal';
+  let action = 'Keep the routine moving';
+  if (missed.length) {
+    tone = 'danger';
+    status = 'Needs attention';
+    signal = 'Missed medication · ' + missed[0].name;
+    action = dashboard.user.role === 'family' ? 'Caregiver review' : 'Review and confirm the dose';
+  } else if (overdue.length) {
+    tone = 'warn';
+    status = 'Action needed';
+    signal = 'Overdue medication · ' + overdue[0].name;
+    action = dashboard.user.role === 'family' ? 'Caregiver check-in' : 'Confirm whether the dose was taken';
+  } else if (pending.length) {
+    tone = 'neutral';
+    status = 'Upcoming';
+    signal = 'Next dose · ' + pending[0].name;
+    action = dashboard.user.role === 'family' ? 'Stay informed' : 'Confirm the next dose';
+  } else if (appointment) {
+    tone = 'neutral';
+    status = 'On track';
+    signal = 'Next appointment · ' + appointment.doctor;
+    action = 'Prepare for the visit';
+  }
+  return { medications, taken, missed, overdue, pending, appointment, tone, status, signal, action, attentionCount: missed.length + overdue.length };
+}
+
+function actionQueue() {
+  const state = coordinationState();
+  const editable = dashboard.user.role !== 'family';
+  const actions = [];
+  if (state.missed[0]) {
+    const medication = state.missed[0];
+    actions.push({
+      tone: 'danger',
+      title: 'Review missed ' + medication.name,
+      detail: 'Scheduled for ' + formatTime(medication.schedule) + ' · confirm what happened',
+      button: editable ? `<button class="button button-primary" data-take="${medication.id}">Mark as taken</button>` : '<span class="chip chip-neutral">Caregiver action</span>'
+    });
+  } else if (state.overdue[0]) {
+    const medication = state.overdue[0];
+    actions.push({
+      tone: 'warn',
+      title: 'Check ' + medication.name,
+      detail: 'Scheduled for ' + formatTime(medication.schedule) + ' · now overdue',
+      button: editable ? `<button class="button button-primary" data-take="${medication.id}">Mark as taken</button>` : '<span class="chip chip-neutral">Caregiver action</span>'
+    });
+  } else if (state.pending[0]) {
+    const medication = state.pending[0];
+    actions.push({
+      tone: 'neutral',
+      title: 'Next: ' + medication.name,
+      detail: 'Due at ' + formatTime(medication.schedule) + ' · ' + medication.instructions,
+      button: editable ? `<button class="button button-primary" data-take="${medication.id}">Mark as taken</button>` : '<span class="chip chip-neutral">Upcoming</span>'
+    });
+  }
+  if (state.appointment) {
+    actions.push({
+      tone: 'neutral',
+      title: 'Prepare for ' + state.appointment.doctor,
+      detail: appointmentDay(state.appointment.date) + ' · ' + formatTime(state.appointment.time) + ' · ' + state.appointment.location,
+      button: '<button class="button button-secondary" data-view="appointments">View appointment</button>'
+    });
+  }
+  if (!actions.length) {
+    actions.push({
+      tone: 'ok',
+      title: 'Everything is confirmed',
+      detail: 'No open care actions are waiting right now.',
+      button: '<span class="chip chip-ok">On track</span>'
+    });
+  }
+  return actions.slice(0, 3).map((item, index) => `<li class="action-item">
+    <span class="action-number" aria-hidden="true">${index + 1}</span>
+    <div class="action-main">
+      <div class="action-title-row"><h3>${escapeHtml(item.title)}</h3><span class="chip ${chipClass(item.tone)}">${item.tone === 'danger' ? 'Urgent' : item.tone === 'warn' ? 'Review' : item.tone === 'ok' ? 'Clear' : 'Next'}</span></div>
+      <p>${escapeHtml(item.detail)}</p>
+    </div>
+    <div class="action-side">${item.button}</div>
+  </li>`).join('');
+}
+
+function continuityHeroCard() {
+  const state = coordinationState();
+  const medicationCount = state.medications.length ? state.taken + '/' + state.medications.length : '0/0';
+  const next = state.appointment ? appointmentDay(state.appointment.date) : 'None';
+  const readiness = state.attentionCount ? 'Needs review' : 'Ready';
+  return `<section class="card continuity-hero" aria-labelledby="continuity-title">
+    <div class="continuity-hero-top">
+      <div>
+        <p class="eyebrow">Care continuity</p>
+        <h2 id="continuity-title">${state.status}</h2>
+        <p class="lead">CareMesh connects a care signal to the next action, the care circle, and a visible record.</p>
+      </div>
+      <span class="chip ${chipClass(state.tone)}">${escapeHtml(state.signal)}</span>
+    </div>
+    <div class="coord-metrics" aria-label="Care coordination snapshot">
+      <div class="metric"><span>Medication plan</span><strong>${medicationCount}</strong><small>${state.attentionCount ? state.attentionCount + ' item' + (state.attentionCount === 1 ? '' : 's') + ' need review' : 'No open medication issue'}</small></div>
+      <div class="metric"><span>Next appointment</span><strong>${escapeHtml(next)}</strong><small>${state.appointment ? escapeHtml(state.appointment.doctor) : 'No upcoming visit'}</small></div>
+      <div class="metric"><span>Care circle</span><strong>${dashboard.careTeam.length + 1}</strong><small>${escapeHtml(readiness)} · shared context</small></div>
+    </div>
+  </section>`;
+}
+
+function careChainCard() {
+  const state = coordinationState();
+  const finalStep = state.attentionCount ? 'Care circle is ready for review' : 'Care state stays visible to the circle';
+  return `<section class="card" aria-labelledby="chain-title">
+    <div class="card-head"><h2 id="chain-title">Care continuity chain</h2><span class="chip chip-neutral">Signal → action → record</span></div>
+    <div class="care-chain" role="list">
+      <div class="chain-step" role="listitem"><span class="chain-icon" aria-hidden="true">1</span><div><strong>Signal</strong><p>${escapeHtml(state.signal)}</p></div></div>
+      <span class="chain-arrow" aria-hidden="true">→</span>
+      <div class="chain-step" role="listitem"><span class="chain-icon" aria-hidden="true">2</span><div><strong>Action</strong><p>${escapeHtml(state.action)}</p></div></div>
+      <span class="chain-arrow" aria-hidden="true">→</span>
+      <div class="chain-step" role="listitem"><span class="chain-icon" aria-hidden="true">3</span><div><strong>Record</strong><p>Timeline captures what changed.</p></div></div>
+      <span class="chain-arrow" aria-hidden="true">→</span>
+      <div class="chain-step" role="listitem"><span class="chain-icon" aria-hidden="true">4</span><div><strong>Handoff</strong><p>${escapeHtml(finalStep)}</p></div></div>
+    </div>
+  </section>`;
+}
+
+function handoffText() {
+  const state = coordinationState();
+  const medicationSummary = state.medications.length
+    ? state.taken + ' of ' + state.medications.length + ' scheduled medication' + (state.medications.length === 1 ? '' : 's') + ' confirmed.'
+    : 'No medications are scheduled today.';
+  const attention = state.attentionCount
+    ? (state.missed.length ? state.missed.length + ' missed' : '') + (state.missed.length && state.overdue.length ? ' and ' : '') + (state.overdue.length ? state.overdue.length + ' overdue' : '') + '.'
+    : 'No open medication issue.';
+  const appointment = state.appointment
+    ? state.appointment.doctor + ' on ' + formatDateLong(state.appointment.date) + ' at ' + formatTime(state.appointment.time) + '.'
+    : 'No upcoming appointment.';
+  const circle = dashboard.careTeam.map((member) => member.name + ' (' + member.role + ')').join(', ');
+  return 'CareMesh handoff · ' + dashboard.profile.name + '\n\n' +
+    medicationSummary + '\n' +
+    'Attention: ' + attention + '\n' +
+    'Next appointment: ' + appointment + '\n' +
+    'Care circle: ' + (circle || 'Not configured') + '.\n\n' +
+    'Next coordination step: ' + state.action + '.';
+}
+
+function handoffCard() {
+  return `<section class="card handoff-card" aria-labelledby="handoff-title">
+    <div class="card-head"><div><p class="eyebrow">Care handoff</p><h2 id="handoff-title">One message for the next person</h2></div><span class="chip chip-neutral">Shareable summary</span></div>
+    <p class="helper">Turn the current care state into a plain-language handoff without exposing internal IDs or system details.</p>
+    <pre class="handoff-text" id="handoff-text">${escapeHtml(handoffText())}</pre>
+    <div class="button-row">
+      <button class="button button-secondary" id="copy-handoff-btn" type="button">Copy handoff</button>
+    </div>
+  </section>`;
 }
 
 function overviewView() {
   const medications = dashboard.medications;
   const taken = medications.filter((medication) => medication.status === 'taken').length;
   const firstName = dashboard.profile.name.split(' ')[0];
-  const pulse = carePulse(medications);
   const isElder = dashboard.user.role === 'elder';
   return `
-    ${pageHead(isElder ? `Hello, ${escapeHtml(firstName)}.` : `${escapeHtml(firstName)}’s care today.`, `Today is ${escapeHtml(todayLong())}. ${isElder ? 'Here is what needs your attention, in order.' : 'Here is what needs attention, in order.'}`)}
+    ${pageHead(isElder ? `Hello, ${escapeHtml(firstName)}.` : `${escapeHtml(firstName)}’s care today.`, 'Today’s care is organized around the next action, not a wall of information.')}
     <div class="stack">
-      ${focusCard(medications, dashboard.user.role !== 'family')}
-      ${medicationSummaryCard(medications, taken)}
+      ${continuityHeroCard()}
       <div class="cols">
+        <section class="card" aria-labelledby="actions-title">
+          <div class="card-head"><h2 id="actions-title">What happens next</h2><span class="chip chip-neutral">Priority queue</span></div>
+          <ol class="action-list">${actionQueue()}</ol>
+        </section>
         ${appointmentCard(nextAppointment())}
-        ${pulseCard(pulse)}
       </div>
+      ${medicationSummaryCard(medications, taken)}
+      ${careChainCard()}
       ${careCircleCard()}
+      ${careBriefCard()}
+      ${handoffCard()}
+    </div>`;
+}
+
+function continuityView() {
+  return `
+    ${pageHead('Care continuity', 'The layer that turns care events into coordinated next steps across the elder, caregiver and family.')}
+    <div class="stack">
+      ${continuityHeroCard()}
+      <section class="card" aria-labelledby="continuity-actions-title">
+        <div class="card-head"><h2 id="continuity-actions-title">Open action queue</h2><span class="chip chip-neutral">Resolve in order</span></div>
+        <ol class="action-list">${actionQueue()}</ol>
+      </section>
+      ${careChainCard()}
+      ${handoffCard()}
       ${careBriefCard()}
     </div>`;
 }
@@ -311,8 +495,9 @@ function personRow(person) {
 
 function careBriefCard() {
   return `<section class="card" aria-labelledby="brief-title">
-    <div class="card-head"><h2 id="brief-title">Today’s care brief</h2><span class="chip chip-neutral">Summary</span></div>
+    <div class="card-head"><div><h2 id="brief-title">Today’s care brief</h2><span class="chip chip-neutral">Structured summary</span></div><button class="button button-secondary" id="refresh-brief-btn" type="button">Refresh summary</button></div>
     <p class="brief">${escapeHtml(dashboard.careBrief)}</p>
+    <p class="helper">The brief is generated only from the care data already in CareMesh. It is not medical advice.</p>
   </section>`;
 }
 
@@ -400,6 +585,52 @@ function timelineView() {
     </section>`;
 }
 
+
+function judgeTourView() {
+  return pageHead('Judge Tour', 'A 60-second path through the product, mapped to the criteria that matter in an innovation hackathon.') +
+    '<div class="stack">' +
+      '<section class="card judge-hero">' +
+        '<p class="eyebrow">CareMesh in one sentence</p>' +
+        '<h2>Care coordination, not another reminder app.</h2>' +
+        '<p class="lead">CareMesh connects daily care signals, next actions, trusted people, and an auditable timeline into one shared care system.</p>' +
+      '</section>' +
+      '<section class="card" aria-labelledby="tour-steps-title">' +
+        '<div class="card-head"><h2 id="tour-steps-title">The 60-second judge path</h2><span class="chip chip-neutral">5 stops</span></div>' +
+        '<ol class="judge-steps">' +
+          '<li><span>1</span><div><strong>Overview</strong><p>See the current care state and priority queue immediately.</p></div><button class="button button-secondary" data-view="overview">Open</button></li>' +
+          '<li><span>2</span><div><strong>Continuity</strong><p>See CarePulse turn a signal into an action, record and handoff.</p></div><button class="button button-secondary" data-view="continuity">Open</button></li>' +
+          '<li><span>3</span><div><strong>Medication + appointments</strong><p>Show that the system manages concrete care workflows, not just a dashboard.</p></div><button class="button button-secondary" data-view="medications">Open</button></li>' +
+          '<li><span>4</span><div><strong>Care Circle</strong><p>Show role-aware access and shared context for elder, caregiver and family.</p></div><button class="button button-secondary" data-view="care-team">Open</button></li>' +
+          '<li><span>5</span><div><strong>Timeline</strong><p>Close the loop with a visible activity record.</p></div><button class="button button-secondary" data-view="timeline">Open</button></li>' +
+        '</ol>' +
+      '</section>' +
+      '<div class="cols">' +
+        '<section class="card" aria-labelledby="rubric-title">' +
+          '<div class="card-head"><h2 id="rubric-title">Why it scores</h2><span class="chip chip-ok">FLARE fit</span></div>' +
+          '<ul class="rubric-list">' +
+            '<li><strong>Innovation</strong><span>Care continuity is the differentiator: signal → action → record → handoff.</span></li>' +
+            '<li><strong>Technical execution</strong><span>Role-aware session auth, server-side authorization, reminder engine, email adapter and audit timeline.</span></li>' +
+            '<li><strong>Feasibility</strong><span>Simple workflows that can evolve from demo-memory to persistent production storage without redesigning the product.</span></li>' +
+            '<li><strong>Impact</strong><span>Designed for the human coordination gap between an older adult, caregiver and family.</span></li>' +
+          '</ul>' +
+        '</section>' +
+        '<section class="card" aria-labelledby="architecture-proof-title">' +
+          '<div class="card-head"><h2 id="architecture-proof-title">Architecture proof</h2><span class="chip chip-neutral">Under the hood</span></div>' +
+          '<div class="proof-grid">' +
+            '<div><strong>Security</strong><p>Signed session cookie + role gates + security headers.</p></div>' +
+            '<div><strong>Automation</strong><p>Deduplicated reminder workflow with protected cron support.</p></div>' +
+            '<div><strong>AI layer</strong><p>Structured care brief with a deterministic fallback.</p></div>' +
+            '<div><strong>Auditability</strong><p>Medication, appointment and access actions appear in Timeline.</p></div>' +
+          '</div>' +
+        '</section>' +
+      '</div>' +
+      '<section class="card judge-note">' +
+        '<div class="card-head"><h2>Demo tip</h2><span class="chip chip-neutral">Recommended order</span></div>' +
+        '<p class="lead"><strong>Overview → Continuity → Care Circle → Timeline.</strong> The story should feel like one care thread rather than five disconnected screens.</p>' +
+      '</section>' +
+    '</div>';
+}
+
 function bindInteractions() {
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => renderDashboard(button.dataset.view)));
 
@@ -438,6 +669,43 @@ function bindInteractions() {
       <p class="form-error full" role="alert" tabindex="-1" hidden></p>
       <div class="full button-row"><button class="button button-primary" type="submit">Save appointment</button></div>
     </form>`));
+
+
+  document.querySelector('#copy-handoff-btn')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const text = handoffText();
+      await navigator.clipboard.writeText(text);
+      toast('Care handoff copied.');
+    } catch {
+      const node = document.querySelector('#handoff-text');
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      toast('Select and copy the highlighted handoff.');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.querySelector('#refresh-brief-btn')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Refreshing…';
+    try {
+      const result = await api('/api/care-brief', { method: 'POST', body: '{}' });
+      dashboard.careBrief = result.careBrief;
+      renderDashboard(activeView);
+      toast('Care brief refreshed.');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Refresh summary';
+      toast(friendlyError(error.message), true);
+    }
+  });
 
   document.querySelector('#run-reminders-btn')?.addEventListener('click', async (event) => {
     const button = event.currentTarget;
