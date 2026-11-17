@@ -212,7 +212,10 @@ async function api(req, res, url, deps = {}) {
     const header = String(req.headers.authorization || '');
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
     if (!safeEqual(token, config.cronSecret)) return bad(res, 'Unauthorized', 401);
-    const cronUser = { id: 'cron', name: 'CarePulse schedule', role: 'caregiver', status: 'active', source: 'cron' };
+    // This demo deployment runs a single care recipient. Scope the system
+    // actor to it so CarePulse reminders (and voice-first escalation) can
+    // resolve the Firestore recipient without a browser session.
+    const cronUser = { id: 'cron', name: 'CarePulse schedule', role: 'caregiver', status: 'active', source: 'cron', recipientId: DEMO_RECIPIENT_ID };
     const result = await runReminders({ actor: 'CarePulse schedule', user: cronUser });
     return json(res, 200, { ok: true, ...result });
   }
