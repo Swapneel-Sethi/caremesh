@@ -384,6 +384,32 @@ test('DTMF 3 escalates to the caregiver', async () => {
   assert.ok(board.events.some((item) => item.title === 'AI voice check-in escalated to caregiver'));
 });
 
+test('an unclear voice answer asks once more before escalating', async () => {
+  resetDemo();
+  const session = await demoSession();
+
+  const first = await signedCall(`/api/voice/twiml/response?session=${session.id}`, {
+    CallSid: 'CA-unclear',
+    SpeechResult: 'blah blah'
+  });
+  assert.equal(first.statusCode, 200);
+  assert.match(first.text, /<Gather/);
+  assert.match(first.text, /did not understand/i);
+
+  const second = await signedCall(`/api/voice/twiml/response?session=${session.id}`, {
+    CallSid: 'CA-unclear',
+    SpeechResult: 'blah blah'
+  });
+  assert.equal(second.statusCode, 200);
+  assert.doesNotMatch(second.text, /<Gather/);
+  assert.match(second.text, /notified your care circle/i);
+
+  const board = await dashboard(elderCookie);
+  assert.equal(board.medications.find((item) => item.id === 'med-3').status, 'missed');
+  assert.ok(board.events.some((item) => item.title === 'AI voice check-in escalated to caregiver'));
+  assert.ok(board.outbox.some((item) => item.kind === 'voice-escalation'));
+});
+
 test('a replayed webhook cannot mutate medication state twice', async () => {
   resetDemo();
   const session = await demoSession();
