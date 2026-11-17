@@ -183,7 +183,7 @@ async function api(req, res, url, deps = {}) {
   }
 
   // Twilio voice webhooks. These are called by Twilio, not by a browser, so
-  // they authenticate with the official request-validation helper plus an
+  // they authenticate with the official request validation helper plus an
   // opaque, expiring session id. No recipient or medication ids appear here.
   if (route === '/api/voice/twiml/start' || route === '/api/voice/twiml/response' || route === '/api/voice/status') {
     if (method !== 'POST') return bad(res, 'Method not allowed', 405);
@@ -213,7 +213,7 @@ async function api(req, res, url, deps = {}) {
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
     if (!safeEqual(token, config.cronSecret)) return bad(res, 'Unauthorized', 401);
     // This demo deployment runs a single care recipient. Scope the system
-    // actor to it so CarePulse reminders (and voice-first escalation) can
+    // actor to it so CarePulse reminders (and voice escalation) can
     // resolve the Firestore recipient without a browser session.
     const cronUser = { id: 'cron', name: 'CarePulse schedule', role: 'caregiver', status: 'active', source: 'cron', recipientId: DEMO_RECIPIENT_ID };
     const result = await runReminders({ actor: 'CarePulse schedule', user: cronUser });
@@ -339,9 +339,9 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'POST' && route === '/api/voice/check-in') {
-    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role cannot make this change', 403);
     // Triggering an outbound call is a caregiver action. Elders confirm doses
-    // and family members are read-only; neither should place calls.
+    // and family members are read only; neither should place calls.
     if (user.role !== 'caregiver') return bad(res, 'Only a caregiver can start a voice check-in', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
@@ -358,7 +358,7 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'POST' && route === '/api/voice/demo') {
-    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role cannot make this change', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
     const { medicationId, response, sessionId } = input;
@@ -391,7 +391,7 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'POST' && route === '/api/medications') {
-    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role cannot make this change', 403);
     let input;
     try { input = validateMedication(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
     const med = await persistMedication(user, input);
@@ -401,7 +401,7 @@ async function api(req, res, url, deps = {}) {
 
   const medMatch = route.match(/^\/api\/medications\/([^/]+)$/);
   if (method === 'PATCH' && medMatch) {
-    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role cannot make this change', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
     const allowed = {};
@@ -415,7 +415,7 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'POST' && route === '/api/appointments') {
-    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role cannot make this change', 403);
     let input;
     try { input = validateAppointment(await readObject(req)); } catch (error) { return bad(res, error.message, 400); }
     const appointment = await persistAppointment(user, input);
@@ -430,13 +430,13 @@ async function api(req, res, url, deps = {}) {
   }
 
   if (method === 'POST' && route === '/api/reminders/run') {
-    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role cannot make this change', 403);
     const result = await runReminders({ actor: user.name, user });
     return json(res, 200, result);
   }
 
   if (method === 'POST' && route === '/api/invitations') {
-    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role cannot make this change', 403);
     let input;
     try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
     const { invitedUid, role, expiresAt } = input;
@@ -451,7 +451,7 @@ async function api(req, res, url, deps = {}) {
 
   const invRevokeMatch = route.match(/^\/api\/invitations\/([^/]+)\/revoke$/);
   if (method === 'POST' && invRevokeMatch) {
-    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    if (!canMutateRecipient(user)) return bad(res, 'This role cannot make this change', 403);
     try {
       await revokeInvitation(recipientId, invRevokeMatch[1]);
       return json(res, 200, { ok: true });

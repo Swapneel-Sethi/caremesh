@@ -1,7 +1,7 @@
 // Voice intent classification for the CarePulse AI check-in.
 //
-// Deliberately small and conservative: only a bounded set of care-coordination
-// intents is recognised, never free-form medical interpretation. If a phrase is
+// Deliberately small and conservative: only a bounded set of care coordination
+// intents is recognised. It never attempts unrestricted medical interpretation. If a phrase is
 // not clearly one of these, the answer is UNCLEAR so the workflow escalates to a
 // human caregiver instead of guessing.
 

@@ -8,14 +8,14 @@ application host; Firebase Hosting is intentionally not configured.
 | Item | Value |
 | --- | --- |
 | Firebase project | `caremesh-flare-2026` (number `1065697968576`) |
-| Web app | `CareMesh Web` — `1:1065697968576:web:2e10a3c95a2192bb994825` |
+| Web app | `CareMesh Web`: `1:1065697968576:web:2e10a3c95a2192bb994825` |
 | Auth providers | Google sign-in only (`google.com`) |
 | Firestore database | `(default)`, Native/Standard edition |
 | Firestore region | `asia-south1` (Mumbai) |
 | Billing | Spark plan, billing disabled |
-| Hosting | Not configured — Vercel hosts the app |
+| Hosting | Not configured; Vercel hosts the app |
 
-The browser-safe Web SDK values live in `public/firebase-config.json`. A Firebase web
+The Web SDK values that are safe for the browser live in `public/firebase-config.json`. A Firebase web
 API key identifies the project; it is not an admin credential or a secret. No service
 account key, Admin SDK credential, OAuth client secret, or server token is stored in
 this repository.
@@ -31,7 +31,7 @@ engine, and email engine are unchanged.
 - A Google user cannot choose a CareMesh role from the browser.
 - On first sign-in the backend creates `users/{uid}` with `role: "pending"`.
 - New Google accounts never receive `elder` or `caregiver` automatically.
-- Access to a care recipient is granted only through explicit care-team membership
+- Access to a care recipient is granted only through explicit care team membership
   managed by that recipient's owner (or an authorized caregiver).
 - The backend verifies the Firebase ID token, resolves membership, and then issues the
   existing signed CareMesh session. Firestore is never the browser's authorization
@@ -39,7 +39,7 @@ engine, and email engine are unchanged.
 
 ### Why the default role is `pending`
 
-`family` is a real access level in CareMesh. Defaulting a brand-new Google identity to
+`family` is a real access level in CareMesh. Defaulting a new Google identity to
 `family` would imply access to a care recipient before any relationship is verified.
 `pending` grants no recipient access at all; an owner must explicitly link the account
 to a recipient and assign a role. This is the safest default and never escalates
@@ -59,7 +59,7 @@ privileges.
 8. Backend issues signed CareMesh session cookie (HttpOnly, Secure in prod, SameSite=Lax, 8h TTL).
 9. Browser receives session, loads dashboard.
 10. If `role: "pending"`, dashboard returns `{ pending: true, user }` and shows pending screen.
-11. Pending users get 403 for all care-data routes; `/api/me` and logout remain available.
+11. Pending users get 403 for all care data routes; `/api/me` and logout remain available.
 
 ### Authorized domains
 
@@ -83,8 +83,8 @@ Static files retain the base CSP without Firebase origins.
 
 ## Target Firestore data model
 
-The model is care-recipient first, not a global collection layout. It supports multiple
-care recipients.
+The model is organized around each care recipient rather than a global collection layout.
+It supports multiple care recipients.
 
 ```text
 users/{uid}
@@ -99,12 +99,12 @@ careRecipients/{recipientId}
   invitations/{invitationId}
   voiceCalls/{callId}        # completed voice check-in attempts
 
-voiceSessions/{sessionId}    # server-only, opaque, expiring
+voiceSessions/{sessionId}    # server only, opaque, expiring
 ```
 
 ### `users/{uid}`
 
-Server-owned account profile: `uid`, `email`, `displayName`, `role` (`pending` by
+Account profile owned by the server: `uid`, `email`, `displayName`, `role` (`pending` by
 default), `status`, `createdAt`, `updatedAt`, `lastSignInAt`. Clients never write this
 document.
 
@@ -112,14 +112,14 @@ document.
 
 `displayName`, `preferredName`, `timezone`, `status`, `ownerUid`, `createdAt`,
 `updatedAt`. `ownerUid` is the explicit owner account. Ownership is data, not a
-client-supplied claim.
+claim supplied by the client.
 
-Voice consent lives on the same document and is opt-in:
+Voice consent lives on the same document and must be granted explicitly:
 
-- `allowVoiceCalls` — must be `true` before any outbound call.
-- `voicePhone` — E.164 number, server-only.
-- `voiceLanguage` — optional TwiML language, defaults to `CARE_VOICE_LANGUAGE`.
-- `voiceCallWindow` — optional `HH:MM-HH:MM` local window.
+- `allowVoiceCalls`: must be `true` before any outbound call.
+- `voicePhone`: E.164 number, kept on the server only.
+- `voiceLanguage`: optional TwiML language, defaults to `CARE_VOICE_LANGUAGE`.
+- `voiceCallWindow`: optional local calling window in `HH:MM-HH:MM` format.
 
 The seeded demo recipient deliberately has `allowVoiceCalls: false` and no phone;
 the judge simulator does not call anyone.
@@ -127,14 +127,14 @@ the judge simulator does not call anyone.
 ### `careRecipients/{recipientId}/careTeam/{memberId}`
 
 `uid`, `role` (`elder` | `caregiver` | `family`), `status` (`invited` | `active` |
-`revoked`), `permissions`, `addedBy`, `addedAt`. This is the per-recipient
-authorization record the backend checks on every request.
+`revoked`), `permissions`, `addedBy`, `addedAt`. This is the authorization record the
+backend checks for each recipient on every request.
 
 ### Subcollections
 
 - `medications`: `name`, `dose`, `schedule`, `status`, `nextDue`, audit fields.
 - `appointments`: `title`, `provider`, `at`, `location`, `status`, audit fields.
-- `events`: append-only audit/timeline records with `actorUid`, `type`, `at`, `summary`,
+- `events`: audit and timeline records that are only appended, with `actorUid`, `type`, `at`, `summary`,
   and bounded metadata.
 - `reminders`: reminder `key`, channel, due time, delivery status, and dedupe fields.
 - `outbox`: queued/sent messages with provider id, status, timestamps, and error state.
@@ -143,14 +143,14 @@ authorization record the backend checks on every request.
 
 ### `voiceSessions/{sessionId}`
 
-Top-level because inbound Twilio webhooks only know an opaque session id, not which
+Top level because inbound Twilio webhooks only know an opaque session id, not which
 recipient it belongs to. Fields: `recipientId`, `medicationId`, `medicationName`,
 `medicationSchedule`, `status`, `attempt`, `callSid`, `language`, `toMasked`,
 `createdAt`, `expiresAt`. The session id is 24 random bytes; sessions expire after
 12 minutes and are claimed transactionally (`active → processing`) so replays cannot
 mutate state twice. Clients have no read or write access.
 
-Every read and write is scoped by `recipientId` and authorized server-side against
+Every read and write is scoped by `recipientId` and authorized on the server against
 `ownerUid` / `careTeam`. A `recipientId` supplied by the browser is treated as a request
 parameter, never as proof of access.
 
@@ -164,14 +164,14 @@ match /{document=**} {
 }
 ```
 
-Why: CareMesh is server-mediated (`Browser -> CareMesh backend -> Firebase Admin SDK ->
-Firestore`). The backend is the only writer and the only authorization boundary. The
+Why: CareMesh is server mediated (browser to CareMesh backend, then Firebase Admin SDK, then
+Firestore). The backend is the only writer and the only authorization boundary. The
 Admin SDK bypasses client rules. There is no `allow read, write: if true` and no broad
 "any authenticated user" access.
 
 ## Invitation flow
 
-Pending Google accounts gain care-recipient access through explicit invitations:
+Pending Google accounts gain care recipient access through explicit invitations:
 
 1. Elder or caregiver creates invitation: `POST /api/invitations` with `{ invitedUid, role, expiresAt }`
 2. Invitation stored in `careRecipients/{recipientId}/invitations/{invitationId}` with `status: "pending"` and `expiresAt`
@@ -180,7 +180,7 @@ Pending Google accounts gain care-recipient access through explicit invitations:
 5. Invitation can be revoked: `POST /api/invitations/{invitationId}/revoke` (elder/caregiver only)
 
 Invitation constraints:
-- No self-assigned privileged roles (inviter cannot invite themselves as elder/caregiver)
+- No one can assign themselves a privileged role (an inviter cannot invite themselves as elder or caregiver)
 - Invitations expire (default 7 days)
 - Duplicate invitations safely handled (each has unique ID)
 - Acceptance verifies the invited Google identity matches `invitedUid`
@@ -189,12 +189,12 @@ Invitation constraints:
 
 ## IDOR prevention
 
-Every care-data endpoint verifies authenticated user + membership + role + recipient ownership:
+Every care data endpoint verifies authenticated user + membership + role + recipient ownership:
 
 - `checkRecipientAccess(user, recipientId)` confirms the user has an active care team membership for the recipient
 - A `recipientId` supplied by the browser is treated as a request parameter, never as proof of access
-- Family role is read-only for all mutations
-- Pending users receive no care-recipient data (403 on all care-data routes)
+- Family role is read only for all mutations
+- Pending users receive no care recipient data (403 on all care data routes)
 
 ## Indexes
 
@@ -206,8 +206,8 @@ query that requires it; speculative indexes are not added.
 
 `asia-south1` (Mumbai) was available and selected because the primary user and
 development region is India. Vercel Functions currently run in the project's default
-region; if latency to Firestore becomes relevant, co-locate the function region
-(for example Mumbai) through the Vercel project settings — out of scope for this task.
+region; if latency to Firestore becomes relevant, run the function in the same region
+(for example Mumbai) through the Vercel project settings, which is outside the scope of this task.
 
 ## What is intentionally not configured
 

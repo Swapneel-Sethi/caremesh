@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// Configure a voice-enabled runtime before the server module freezes config.
+// Configure a voice enabled runtime before the server module freezes config.
 process.env.CARE_VOICE_ENABLED = 'true';
 process.env.CARE_VOICE_PROVIDER = 'twilio';
 process.env.TWILIO_ACCOUNT_SID = 'ACtest00000000000000000000000000';

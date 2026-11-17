@@ -135,7 +135,7 @@ export function buildReminderCandidates(snapshot, now = new Date(), timeZone = c
 
 function eventTitle(kind, status) {
   if (status === 'failed') return 'Reminder delivery failed';
-  if (status === 'unconfigured') return 'Reminder not sent · no care-circle email configured';
+  if (status === 'unconfigured') return 'Reminder not sent · no care circle email configured';
   if (status === 'preview') return 'Reminder prepared in preview mode';
   if (kind === 'medication-missed') return 'Missed medication alert sent';
   if (kind === 'medication-upcoming') return 'Medication reminder sent';

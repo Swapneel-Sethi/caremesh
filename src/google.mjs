@@ -19,7 +19,7 @@ export async function generateCareBrief(snapshot) {
   if (!config.googleProject) return deterministicCareBrief(snapshot);
   const token = await getGoogleAccessToken();
   const url = `https://${config.googleLocation}-aiplatform.googleapis.com/v1/projects/${config.googleProject}/locations/${config.googleLocation}/publishers/google/models/${config.geminiModel}:generateContent`;
-  const prompt = `You are CarePulse, an elder-care coordination assistant. Summarize only the structured information provided. Do not diagnose, prescribe, or invent medical facts. Identify today's care tasks, missed/pending items, upcoming appointment needs, and one practical coordination action. Use short labels and plain language for an older adult and their caregiver. Data: ${JSON.stringify(snapshot)}`;
+  const prompt = `You are CarePulse, an elder care coordination assistant. Summarize only the structured information provided. Do not diagnose, prescribe, or invent medical facts. Identify today's care tasks, missed/pending items, upcoming appointment needs, and one practical coordination action. Use short labels and plain language for an older adult and their caregiver. Data: ${JSON.stringify(snapshot)}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

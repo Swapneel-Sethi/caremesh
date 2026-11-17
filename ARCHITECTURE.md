@@ -8,25 +8,25 @@ Browser
   ▼
 Node HTTP application
   ├── Auth + signed session cookies
-  ├── REST-style API routes
+  ├── REST style API routes
   ├── Care domain services
   ├── Google Gemini adapter
   ├── Reminder/email adapter
   └── Data repository
        ├── Firestore REST when GOOGLE_CLOUD_PROJECT is configured
-       └── Demo in-memory store for local development
+       └── Demo store held in memory for local development
 ```
 
 ## Security
 
-- Passcodes are stored as scrypt hashes with per-user salts.
+- Passcodes are stored as scrypt hashes with a separate salt for each user.
 - Session identity is in an HttpOnly, SameSite cookie signed with HMAC-SHA256.
-- Authorization checks run server-side for each protected write.
+- Authorization checks run on the server for each protected write.
 - No secrets are shipped to the browser.
 - Demo data is synthetic and not real medical information.
 - Request payloads are validated before persistence.
 - Mutations create audit events.
-- Reminder dispatch uses a server-side provider adapter.
+- Reminder dispatch uses a provider adapter on the server.
 
 ## Scalability
 

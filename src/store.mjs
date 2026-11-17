@@ -34,7 +34,7 @@ async function ensureDemoRecipient(db, recipientId) {
       timezone: 'Asia/Kolkata',
       status: 'active',
       ownerUid: 'usr-elder',
-      // Voice calling is opt-in. Demo data stays silent until an operator
+      // Voice calling requires explicit consent. Demo data stays silent until an operator
       // explicitly configures CARE_VOICE_ENABLED + CARE_VOICE_PHONE.
       allowVoiceCalls: false,
       voicePhone: null,
@@ -374,7 +374,7 @@ export async function checkRecipientAccess(user, recipientId) {
 }
 
 export function canViewRecipient(user) {
-  // View access: any non-pending user with a recipient assigned
+  // View access: any user who is not pending, with a recipient assigned
   return user && !isPending(user) && Boolean(user.recipientId);
 }
 
@@ -428,8 +428,8 @@ export async function getVoiceSession(sessionId) {
 
 // Atomically move a session out of a respondable state. Returns the session
 // that this caller now owns, or null when it is expired, completed or already
-// being processed. This is what stops a replayed webhook or a double-clicked
-// simulator button from mutating medication state twice.
+// being processed. This is what stops a replayed webhook or a simulator button
+// clicked twice from mutating medication state twice.
 export async function claimVoiceSession(sessionId) {
   if (!sessionId) return null;
   if (!useFirestore) {

@@ -1,4 +1,4 @@
-# AGENTS.md — CareMesh
+# AGENTS.md: CareMesh
 
 CareMesh is being prepared for FLARE 2026.
 
@@ -16,8 +16,8 @@ CareMesh is being prepared for FLARE 2026.
 
 ## Preserve existing behavior
 
-- Preserve the existing role-based authorization model (elder, caregiver, family).
-- Preserve signed-session authentication.
+- Preserve the existing role based authorization model (elder, caregiver, family).
+- Preserve signed session authentication.
 - Preserve audit/timeline behavior.
 - Preserve reminder and email functionality.
 - Avoid unnecessary rewrites of stable existing functionality.
@@ -26,7 +26,7 @@ CareMesh is being prepared for FLARE 2026.
 
 - Do not add unsafe or clinically misleading claims.
 - CareMesh is a coordination tool, not a medical device or diagnostic system.
-- Keep product behavior aligned with the architecture/product-lead instructions.
+- Keep product behavior aligned with the architecture and product lead instructions.
 
 ## Verification
 

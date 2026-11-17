@@ -99,7 +99,7 @@ function withinCallWindow(window, timeZone) {
 }
 
 // Resolves who may be called, without ever returning the number to a caller
-// outside the backend. Consent is opt-in: a recipient must have
+// outside the backend. Consent must be explicit: a recipient must have
 // allowVoiceCalls === true, except the demo test recipient which is enabled
 // explicitly through CARE_VOICE_ENABLED + CARE_VOICE_PHONE.
 export async function resolveVoiceTarget(user) {
@@ -163,8 +163,8 @@ function publicOrigin() {
 
 function providerReason(error) {
   const code = Number(error?.code || 0);
-  // Best-effort Twilio mapping. India destinations need a permitted,
-  // non-Indian caller ID; surfacing that as a setup error lets the caregiver
+  // Twilio error mapping is best effort. India destinations need a permitted
+  // caller ID from outside India; surfacing that as a setup error lets the caregiver
   // fix configuration instead of retrying an impossible call.
   if ([21210, 21212, 21215, 21606].includes(code)) return 'caller_id_not_supported';
   if ([21211, 21214, 21217, 13224].includes(code)) return 'invalid_to_number';
@@ -302,9 +302,9 @@ async function applyOutcome(session, { outcome, reason, attempt }) {
       await sendReminder({
         user: actor,
         to: config.careTeamAlertEmails,
-        subject: `CareMesh alert · AI voice check-in needs follow-up: ${session.medicationName || session.medicationId}`,
+        subject: `CareMesh alert · AI voice check-in needs caregiver attention: ${session.medicationName || session.medicationId}`,
         text: [
-          'CareMesh AI voice check-in needs caregiver follow-up.',
+          'CareMesh AI voice check-in needs caregiver attention.',
           '',
           `Medication: ${session.medicationName || session.medicationId}`,
           `Scheduled: ${scheduleLabel(session.medicationSchedule || '00:00')}`,
@@ -462,7 +462,7 @@ export async function handleVoiceStatus({ sessionId, callStatus }) {
   return { status: 'escalated', sessionId: claimed.id };
 }
 
-// Judge-facing simulator. Uses the same session and outcome pipeline as a real
+// Simulator for judges. Uses the same session and outcome pipeline as a real
 // call, so what judges see is what production does.
 export async function simulateVoiceCheckIn({ user, medicationId, response, sessionId = null }) {
   const recipientId = recipientIdFor(user);

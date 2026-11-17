@@ -87,7 +87,7 @@ test('dashboard returns pending for pending user', async () => {
   assert.equal(res.body.user.role, 'pending');
 });
 
-test('pending user gets 403 for care-data routes', async () => {
+test('pending user gets 403 for care data routes', async () => {
   const handler = createHandler({ resolveUser: async () => ({ id: 'fb-pending', name: 'Test', role: 'pending', status: 'pending', email: 'test@example.com', initials: 'TE' }) });
   const req = makeReq('POST', '/api/medications', { name: 'Test', schedule: '08:00' }, makeSessionCookie('fb-pending'));
   const res = makeRes();

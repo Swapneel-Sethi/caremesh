@@ -159,7 +159,7 @@ function navMarkup() {
 function renderDashboard(view = 'overview') {
   activeView = view;
   const user = dashboard.user;
-  document.title = `CareMesh — ${viewTitles[view]}`;
+  document.title = `CareMesh: ${viewTitles[view]}`;
   if (location.hash !== `#${view}`) history.replaceState(null, '', `#${view}`);
   sessionUser.textContent = `${user.name} · ${roleLabels[user.role] || user.role}`;
   sessionUser.classList.remove('hidden');
@@ -334,7 +334,7 @@ function handoffText() {
 function handoffCard() {
   return `<section class="card handoff-card" aria-labelledby="handoff-title">
     <div class="card-head"><div><p class="eyebrow">Care handoff</p><h2 id="handoff-title">One message for the next person</h2></div><span class="chip chip-neutral">Shareable summary</span></div>
-    <p class="helper">Turn the current care state into a plain-language handoff without exposing internal IDs or system details.</p>
+    <p class="helper">Turn the current care state into a handoff in plain language without exposing internal IDs or system details.</p>
     <pre class="handoff-text" id="handoff-text">${escapeHtml(handoffText())}</pre>
     <div class="button-row">
       <button class="button button-secondary" id="copy-handoff-btn" type="button">Copy handoff</button>
@@ -404,7 +404,7 @@ function focusCard(medications, editable) {
       ${editable ? `<button class="button button-primary button-large" data-take="${next.id}">✓ Mark as taken</button>` : ''}
       <button class="button button-secondary" data-view="medications">View all medications</button>
     </div>
-    ${editable ? '' : '<p class="helper">Family access is read-only. The elder and caregiver confirm doses.</p>'}
+    ${editable ? '' : '<p class="helper">Family access is read only. The elder and caregiver confirm doses.</p>'}
   </section>`;
 }
 
@@ -518,7 +518,7 @@ function medicationsView() {
   const pulse = carePulse(medications);
   const lead = editable
     ? 'Confirm each medicine after you take it. Times and instructions are shown for every dose.'
-    : 'Here are the medications in this care plan. Family access is read-only.';
+    : 'Here are the medications in this care plan. Family access is read only.';
   return `
     ${pageHead('Medications', lead)}
     <div class="stack">
@@ -533,7 +533,7 @@ function medicationsView() {
         ${editable ? `<div class="button-row">
           <button class="button button-secondary" id="add-med-btn">Add medication</button>
           <button class="button button-secondary" id="run-reminders-btn">Send reminders</button>
-        </div><p class="helper">Send reminders checks due medications and upcoming appointments, then emails your care circle.</p>` : `<p class="read-only">Family access is read-only. The elder and caregiver manage medications.</p>`}
+        </div><p class="helper">Send reminders checks due medications and upcoming appointments, then emails your care circle.</p>` : `<p class="read-only">Family access is read only. The elder and caregiver manage medications.</p>`}
       </section>
     </div>`;
 }
@@ -549,7 +549,7 @@ function appointmentsView() {
       <section class="card" aria-labelledby="all-appts-title">
         <div class="card-head"><h2 id="all-appts-title">All appointments</h2><span class="chip chip-neutral">${appointments.length} scheduled</span></div>
         <ul class="appt-list">${appointments.map((appointment) => appointmentRow(appointment)).join('')}</ul>
-        ${editable ? `<div class="button-row"><button class="button button-primary" id="add-appt-btn">Add appointment</button></div>` : `<p class="read-only">Family access is read-only for appointment changes.</p>`}
+        ${editable ? `<div class="button-row"><button class="button button-primary" id="add-appt-btn">Add appointment</button></div>` : `<p class="read-only">Family access is read only for appointment changes.</p>`}
       </section>
     </div>`;
 }
@@ -576,7 +576,7 @@ function careTeamView() {
       </section>
       <section class="card">
         <h2>You stay in control</h2>
-        <p class="lead">Only the elder decides who can see or change care details. Every change is checked securely, and family access is read-only.</p>
+        <p class="lead">Only the elder decides who can see or change care details. Every change is checked securely, and family access is read only.</p>
         <div class="button-row"><button class="button button-secondary" data-view="timeline">View recent activity</button></div>
       </section>
     </div>`;
@@ -596,7 +596,7 @@ function timelineView() {
 
 
 function judgeTourView() {
-  return pageHead('Judge Tour', 'A 60-second path through the product, mapped to the criteria that matter in an innovation hackathon.') + `
+  return pageHead('Judge Tour', 'A guided path through the product that takes one minute and maps to the criteria that matter in an innovation hackathon.') + `
     <div class="stack">
       <section class="card judge-hero">
         <p class="eyebrow">CareMesh in one sentence</p>
@@ -627,7 +627,7 @@ function judgeTourView() {
         </div>
       </section>
       <section class="card" aria-labelledby="tour-steps-title">
-        <div class="card-head"><h2 id="tour-steps-title">The 60-second judge path</h2><span class="chip chip-neutral">5 stops</span></div>
+        <div class="card-head"><h2 id="tour-steps-title">The judge path</h2><span class="chip chip-neutral">About one minute</span></div>
         <p class="judge-path-note">Follow one care thread instead of exploring the app randomly.</p>
         <ol class="judge-steps">
           <li><span>1</span><div><strong>Overview</strong><p>See the current care state and the next action immediately.</p></div><button class="button button-secondary" data-view="overview" aria-label="Open Overview">Open</button></li>
@@ -648,7 +648,7 @@ function judgeTourView() {
           <article class="card diff-card diff-circle">
             <span class="diff-index" aria-hidden="true">02</span>
             <h3>Care Circle</h3>
-            <p>Elder, caregiver and family see the same care context with role-aware permissions.</p>
+            <p>Elder, caregiver and family see the same care context with role based permissions.</p>
           </article>
           <article class="card diff-card diff-record">
             <span class="diff-index" aria-hidden="true">03</span>
@@ -692,8 +692,8 @@ function judgeTourView() {
           <div class="card-head"><h2 id="rubric-title">Why it scores</h2><span class="chip chip-ok">FLARE fit</span></div>
           <ul class="rubric-list">
             <li><strong>Innovation</strong><span>Care continuity is the differentiator: signal → action → record → handoff.</span></li>
-            <li><strong>Technical execution</strong><span>Role-aware session auth, server-side authorization, reminder engine, email adapter and audit timeline.</span></li>
-            <li><strong>Feasibility</strong><span>Simple workflows that can evolve from demo-memory to persistent production storage without redesigning the product.</span></li>
+            <li><strong>Technical execution</strong><span>Session auth that respects each role, server side authorization, reminder engine, email adapter and audit timeline.</span></li>
+            <li><strong>Feasibility</strong><span>Simple workflows that can move from temporary demo storage to persistent production storage without redesigning the product.</span></li>
             <li><strong>Impact</strong><span>Designed for the human coordination gap between an older adult, caregiver and family.</span></li>
           </ul>
         </section>
@@ -704,7 +704,7 @@ function judgeTourView() {
             <div><strong>Automation</strong><p>Deduplicated reminder workflow with protected cron support.</p></div>
             <div><strong>AI layer</strong><p>Structured care brief with a deterministic fallback.</p></div>
             <div><strong>Auditability</strong><p>Medication, appointment and access actions appear in Timeline.</p></div>
-            <div class="proof-resilience"><strong>Demo resilience</strong><p>Core workflows remain usable with a deterministic AI fallback and demo-memory persistence, so the product still functions when optional services are unavailable.</p></div>
+            <div class="proof-resilience"><strong>Demo resilience</strong><p>Core workflows remain usable with a deterministic AI fallback and demo data stored in memory, so the product still functions when optional services are unavailable.</p></div>
           </div>
         </section>
       </div>
@@ -941,7 +941,7 @@ function openVoiceSimulator(medication) {
       });
       if (result.status === 'retry') {
         sessionId = result.sessionId;
-        status.textContent = 'No clear answer. The agent asks once more — choose the elder’s response again.';
+        status.textContent = 'No clear answer. The agent asks once more. Choose the elder’s response again.';
         status.hidden = false;
         buttons.forEach((item) => { item.disabled = false; });
         return;
@@ -1001,7 +1001,7 @@ async function handleGoogleSignIn() {
     await loadDashboard();
   } catch (error) {
     const errorNode = document.querySelector('#login-error');
-    const msg = error.code === 'auth/popup-closed-by-user' ? 'Sign-in was cancelled.' : error.code === 'auth/unauthorized-domain' ? 'This domain is not authorized for Firebase Auth. Contact support.' : error.message;
+    const msg = error.code === 'auth/popup-closed-by-user' ? 'Sign in was cancelled.' : error.code === 'auth/unauthorized-domain' ? 'This domain is not authorized for Firebase Auth. Contact support.' : error.message;
     if (errorNode) { errorNode.textContent = friendlyError(msg); errorNode.hidden = false; errorNode.focus(); }
     if (btn) { btn.disabled = false; btn.textContent = 'Continue with Google'; }
   }
@@ -1009,7 +1009,7 @@ async function handleGoogleSignIn() {
 
 function renderPending(user) {
   hideChrome();
-  document.title = 'CareMesh — Access Pending';
+  document.title = 'CareMesh: Access Pending';
   main.setAttribute('aria-busy', 'false');
   main.innerHTML = `
     <section class="login">
@@ -1026,7 +1026,7 @@ function renderPending(user) {
       <div class="card login-card pending-card">
         <h2>${escapeHtml(user.displayName || user.email || 'Your account')}</h2>
         <p class="row-meta">Role: <strong>${user.role || 'pending'}</strong> · Status: <strong>${user.status || 'pending'}</strong></p>
-        <p class="row-meta">Email: ${escapeHtml(user.email || '—')}</p>
+        <p class="row-meta">Email: ${escapeHtml(user.email || 'Not provided')}</p>
         <form id="pending-logout-form">
           <button class="button button-secondary button-large" type="submit">Sign out</button>
         </form>
@@ -1045,17 +1045,17 @@ function renderPending(user) {
 
 function renderLogin() {
   hideChrome();
-  document.title = 'CareMesh — Sign in';
+  document.title = 'CareMesh: Sign in';
   main.setAttribute('aria-busy', 'false');
   main.innerHTML = `
     <section class="login">
       <div class="login-copy">
-        <p class="eyebrow">Elder-first care</p>
+        <p class="eyebrow">Elder first care</p>
         <h1>Care, connected.</h1>
-        <p class="lead">Medicines, appointments and your trusted care circle — together in one calm, simple place.</p>
+        <p class="lead">Medicines, appointments and your trusted care circle in one calm, simple place.</p>
         <ul class="login-points">
           <li><span class="tick" aria-hidden="true">✓</span><span>One clear next step at a time</span></li>
-          <li><span class="tick" aria-hidden="true">✓</span><span>Large text and easy-to-press buttons</span></li>
+          <li><span class="tick" aria-hidden="true">✓</span><span>Large text and buttons that are easy to press</span></li>
           <li><span class="tick" aria-hidden="true">✓</span><span>You decide who can see your care</span></li>
         </ul>
       </div>
@@ -1066,7 +1066,7 @@ function renderLogin() {
           <span>Continue with Google</span>
         </button>
         <div class="divider" aria-hidden="true"><span>or</span></div>
-        <p class="row-meta">Choose who you are, then enter the 4-digit access code.</p>
+        <p class="row-meta">Choose who you are, then enter the four digit access code.</p>
         <fieldset class="role-picker">
           <legend>I am the…</legend>
           <div class="role-options">
@@ -1077,7 +1077,7 @@ function renderLogin() {
           </div>
         </fieldset>
         <form id="login-form">
-          <div class="field"><label for="passcode">4-digit access code</label><input id="passcode" class="input" inputmode="numeric" autocomplete="one-time-code" maxlength="4" pattern="[0-9]{4}" placeholder="••••" required /></div>
+          <div class="field"><label for="passcode">Four digit access code</label><input id="passcode" class="input" inputmode="numeric" autocomplete="one-time-code" maxlength="4" pattern="[0-9]{4}" placeholder="••••" required /></div>
           <p id="login-error" class="form-error" role="alert" tabindex="-1" hidden></p>
           <button class="button button-primary button-large" type="submit">Sign in</button>
         </form>
