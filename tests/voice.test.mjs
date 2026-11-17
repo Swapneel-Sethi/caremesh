@@ -86,6 +86,21 @@ function signedCall(path, params, { signature, includeSignature = true } = {}) {
   });
 }
 
+function signedExternalCall(path, params, origin = 'https://caremesh-preview.vercel.app') {
+  const url = `${origin}${path}`;
+  const signature = twilio.getExpectedTwilioSignature(AUTH_TOKEN, url, params);
+  return call({
+    method: 'POST',
+    path,
+    form: params,
+    headers: {
+      'x-twilio-signature': signature,
+      'x-forwarded-host': new URL(origin).host,
+      'x-forwarded-proto': new URL(origin).protocol.replace(':', '')
+    }
+  });
+}
+
 async function dashboard(cookie) {
   const res = await call({ path: '/api/dashboard', cookie });
   assert.equal(res.statusCode, 200);
@@ -332,6 +347,14 @@ test('a valid signed webhook returns TwiML with no recipient ids in the URL', as
   assert.match(res.text, new RegExp(`session=${session.id}`));
   assert.doesNotMatch(res.text, /demo-recipient/);
   assert.doesNotMatch(res.text, /med-3/);
+});
+
+test('signature validation uses the public forwarded host and protocol', async () => {
+  resetDemo();
+  const session = await demoSession();
+  const res = await signedExternalCall(`/api/voice/twiml/start?session=${session.id}`, { CallSid: 'CA-forwarded' });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers['Content-Type'], /text\/xml/);
 });
 
 test('a signed TAKEN response updates the medication and records one event', async () => {

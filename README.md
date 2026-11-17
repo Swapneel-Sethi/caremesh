@@ -84,6 +84,8 @@ The medication becomes `Missed`, the timeline shows the AI voice escalation, and
 4. Record consent on the care recipient in Firestore: `allowVoiceCalls: true`, `voicePhone` in E.164, optional `voiceLanguage`, optional `voiceCallWindow` such as `08:00-21:00`. Calling is opt-in; no existing or new user is silently enabled.
 5. Trigger a check-in from **Medications** as a caregiver, then confirm the timeline event and Twilio call logs.
 
+The deployment must be publicly reachable by Twilio. Vercel Deployment Protection blocks webhook requests on protected previews; use an unprotected preview or a protection-bypass setup when testing real calls.
+
 Reference docs: [TwiML Voice](https://www.twilio.com/docs/voice/twiml), [Gather](https://www.twilio.com/docs/voice/twiml/gather), [webhook signature validation](https://www.twilio.com/docs/usage/webhooks/webhooks-security), [India voice guidelines](https://www.twilio.com/docs/voice/guidelines/india).
 
 ### Security and deduplication

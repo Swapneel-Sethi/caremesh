@@ -24,6 +24,6 @@ export const config = Object.freeze({
   voicePhone: process.env.CARE_VOICE_PHONE || '',
   voicePublicOrigin: process.env.CARE_VOICE_PUBLIC_ORIGIN || '',
   voiceLanguage: process.env.CARE_VOICE_LANGUAGE || 'en-IN',
-  voiceMaxAttempts: Number(process.env.CARE_VOICE_MAX_ATTEMPTS || 2),
+  voiceMaxAttempts: Math.min(3, Math.max(1, Number(process.env.CARE_VOICE_MAX_ATTEMPTS) || 2)),
   voiceAutoEscalate: process.env.CARE_VOICE_AUTO_ESCALATE !== 'false'
 });
