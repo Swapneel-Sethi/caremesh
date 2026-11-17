@@ -295,6 +295,41 @@ a { color: var(--green-deep); }
   gap: 0.6rem;
 }
 
+/* AI voice check-in */
+
+.voice-checkin {
+  margin-top: 0.9rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--green-tint);
+  border-left: 4px solid var(--green);
+  border-radius: var(--radius-small);
+  background: var(--green-soft);
+}
+
+.voice-label {
+  font-size: 0.95rem;
+  color: var(--green-deep);
+  margin-bottom: 0.65rem;
+}
+
+.voice-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.voice-actions .button { min-height: 44px; }
+
+.voice-state {
+  margin-top: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius-small);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-border);
+  color: var(--amber);
+  font-size: 0.95rem;
+}
+
 /* Appointments */
 
 .appt-when { font-size: 1.3rem; font-weight: 800; margin: 0.5rem 0 0.25rem; }

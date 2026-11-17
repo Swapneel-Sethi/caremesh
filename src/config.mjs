@@ -15,5 +15,15 @@ export const config = Object.freeze({
   mailFrom: process.env.MAIL_FROM || 'CareMesh <onboarding@resend.dev>',
   careTeamAlertEmails: list(process.env.CARE_TEAM_ALERT_EMAILS),
   cronSecret: process.env.CRON_SECRET || '',
-  reminderTimeZone: process.env.CARE_TIME_ZONE || 'Asia/Kolkata'
+  reminderTimeZone: process.env.CARE_TIME_ZONE || 'Asia/Kolkata',
+  voiceEnabled: process.env.CARE_VOICE_ENABLED === 'true',
+  voiceProvider: process.env.CARE_VOICE_PROVIDER || 'twilio',
+  twilioAccountSid: process.env.TWILIO_ACCOUNT_SID || '',
+  twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || '',
+  twilioFromNumber: process.env.TWILIO_FROM_NUMBER || '',
+  voicePhone: process.env.CARE_VOICE_PHONE || '',
+  voicePublicOrigin: process.env.CARE_VOICE_PUBLIC_ORIGIN || '',
+  voiceLanguage: process.env.CARE_VOICE_LANGUAGE || 'en-IN',
+  voiceMaxAttempts: Number(process.env.CARE_VOICE_MAX_ATTEMPTS || 2),
+  voiceAutoEscalate: process.env.CARE_VOICE_AUTO_ESCALATE !== 'false'
 });

@@ -1,7 +1,8 @@
 import { config } from './config.mjs';
-import { domainSnapshot, persistEvent, persistReminder, checkReminderExists } from './store.mjs';
+import { domainSnapshot, persistEvent, persistReminder, checkReminderExists, claimReminder, releaseReminder } from './store.mjs';
 import { sendReminder } from './email.mjs';
 import { clockLabel, dateLong, dayOffset, localParts, scheduleLabel, timeToMinutes } from './time.mjs';
+import { isVoiceReady, startAutomatedVoiceCheckIn } from './voice.mjs';
 
 function getUserSnapshot(snapshot, user) {
   return { ...snapshot, _user: user };
@@ -164,7 +165,40 @@ export async function runReminders({ actor = 'CarePulse', now = new Date(), snap
       continue;
     }
 
+    // AI voice first, human when necessary. A missed dose is handled by a
+    // voice check-in when voice calling is configured; the caregiver email is
+    // only sent after the check-in fails or cannot be started. The claim uses
+    // the existing reminder key so concurrent cron runs cannot both call.
+    if (candidate.kind === 'medication-missed' && isVoiceReady()) {
+      const claimed = await claimReminder(user, {
+        key: candidate.key,
+        kind: 'voice-check-in',
+        status: 'voice-queued',
+        at: now.toISOString()
+      });
+      if (!claimed) {
+        results.push({ ...candidate.summary, status: 'duplicate', delivered: false });
+        continue;
+      }
+      const voice = await startAutomatedVoiceCheckIn({ user, medicationId: candidate.summary.medicationId });
+      if (voice.status === 'queued') {
+        results.push({ ...candidate.summary, status: 'voice-check-in', delivered: false, sessionId: voice.sessionId });
+        continue;
+      }
+      // The provider could not start a call. CareMesh must still alert the care
+      // circle, so release the claim and continue with the normal email path.
+      await releaseReminder(user, candidate.key);
+      await persistEvent(user, {
+        at: clockLabel(now, config.reminderTimeZone),
+        title: 'AI voice check-in could not start · caregiver alerted',
+        actor,
+        type: 'voice',
+        detail: candidate.detail
+      });
+    }
+
     const delivery = await sendReminder({
+      user,
       to: config.careTeamAlertEmails,
       subject: candidate.subject,
       text: candidate.text,

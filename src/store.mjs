@@ -34,6 +34,11 @@ async function ensureDemoRecipient(db, recipientId) {
       timezone: 'Asia/Kolkata',
       status: 'active',
       ownerUid: 'usr-elder',
+      // Voice calling is opt-in. Demo data stays silent until an operator
+      // explicitly configures CARE_VOICE_ENABLED + CARE_VOICE_PHONE.
+      allowVoiceCalls: false,
+      voicePhone: null,
+      voiceLanguage: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
@@ -380,6 +385,166 @@ export function canMutateRecipient(user) {
 
 export function isPending(user) {
   return user?.role === 'pending' || user?.status === 'pending';
+}
+
+// --- AI voice escalation persistence -------------------------------------
+// Sessions are stored at voiceSessions/{sessionId} (top level) so an inbound
+// Twilio webhook can resolve an opaque session id without being told which
+// recipient it belongs to. The recipient id never leaves the backend. Call
+// records stay scoped to careRecipients/{recipientId}/voiceCalls.
+
+const voiceSessionsMemory = new Map();
+const voiceCallsMemory = [];
+
+export async function getCareRecipient(recipientId) {
+  if (!recipientId) return null;
+  if (!useFirestore) return null;
+  const snap = await getAdminDb().collection('careRecipients').doc(recipientId).get();
+  return snap.exists ? { id: snap.id, ...snap.data() } : null;
+}
+
+function voiceSessionExpired(session) {
+  if (!session || !session.expiresAt) return true;
+  return new Date(session.expiresAt).getTime() <= Date.now();
+}
+
+export async function createVoiceSession(session) {
+  if (!session?.id || !session?.recipientId) throw new Error('Voice session requires id and recipient');
+  const record = { ...session, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  if (!useFirestore) {
+    voiceSessionsMemory.set(record.id, record);
+    return record;
+  }
+  await getAdminDb().collection('voiceSessions').doc(record.id).set(record);
+  return record;
+}
+
+export async function getVoiceSession(sessionId) {
+  if (!sessionId) return null;
+  if (!useFirestore) return voiceSessionsMemory.get(sessionId) || null;
+  const snap = await getAdminDb().collection('voiceSessions').doc(sessionId).get();
+  return snap.exists ? { id: snap.id, ...snap.data() } : null;
+}
+
+// Atomically move a session out of a respondable state. Returns the session
+// that this caller now owns, or null when it is expired, completed or already
+// being processed. This is what stops a replayed webhook or a double-clicked
+// simulator button from mutating medication state twice.
+export async function claimVoiceSession(sessionId) {
+  if (!sessionId) return null;
+  if (!useFirestore) {
+    const session = voiceSessionsMemory.get(sessionId);
+    if (!session) return null;
+    if (voiceSessionExpired(session)) {
+      voiceSessionsMemory.set(sessionId, { ...session, status: 'expired', updatedAt: new Date().toISOString() });
+      return null;
+    }
+    if (['completed', 'processing'].includes(session.status)) return null;
+    const claimed = { ...session, status: 'processing', updatedAt: new Date().toISOString() };
+    voiceSessionsMemory.set(sessionId, claimed);
+    return claimed;
+  }
+  const db = getAdminDb();
+  const ref = db.collection('voiceSessions').doc(sessionId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return null;
+    const session = { id: snap.id, ...snap.data() };
+    if (voiceSessionExpired(session)) {
+      tx.update(ref, { status: 'expired', updatedAt: new Date().toISOString() });
+      return null;
+    }
+    if (['completed', 'processing'].includes(session.status)) return null;
+    tx.update(ref, { status: 'processing', updatedAt: new Date().toISOString() });
+    return { ...session, status: 'processing' };
+  });
+}
+
+export async function updateVoiceSession(sessionId, patch) {
+  if (!sessionId) return null;
+  const updates = { ...patch, updatedAt: new Date().toISOString() };
+  if (!useFirestore) {
+    const session = voiceSessionsMemory.get(sessionId);
+    if (!session) return null;
+    const updated = { ...session, ...updates };
+    voiceSessionsMemory.set(sessionId, updated);
+    return updated;
+  }
+  const ref = getAdminDb().collection('voiceSessions').doc(sessionId);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  await ref.set({ ...snap.data(), ...updates });
+  return { id: sessionId, ...snap.data(), ...updates };
+}
+
+export async function createVoiceCallRecord(recipientId, record) {
+  if (!recipientId) throw new Error('No recipient assigned');
+  const call = {
+    id: crypto.randomUUID(),
+    recipientId,
+    provider: 'twilio',
+    startedAt: new Date().toISOString(),
+    ...record
+  };
+  if (!useFirestore) {
+    voiceCallsMemory.unshift(call);
+    voiceCallsMemory.splice(200);
+    return call;
+  }
+  await docRef(getAdminDb(), recipientId, 'voiceCalls', call.id).set(call);
+  return call;
+}
+
+export function voiceCallHistory() {
+  return voiceCallsMemory.map((call) => ({ ...call }));
+}
+
+export function resetVoiceState() {
+  voiceSessionsMemory.clear();
+  voiceCallsMemory.length = 0;
+}
+
+export function isVoiceSessionExpired(session) {
+  return voiceSessionExpired(session);
+}
+
+// Atomically reserve a reminder/voice key so concurrent cron invocations cannot
+// both start a check-in for the same missed dose. Reuses the existing reminder
+// dedupe keys instead of adding a second detection system.
+export async function claimReminder(user, record) {
+  if (!record?.key) return false;
+  if (!useFirestore) {
+    const state = memoryState();
+    state.reminders = state.reminders || [];
+    if (state.reminders.some((item) => item.key === record.key)) return false;
+    state.reminders.unshift({ ...record, claimedAt: new Date().toISOString() });
+    state.reminders = state.reminders.slice(0, 200);
+    return true;
+  }
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  if (!recipientId) return false;
+  const ref = db.collection(recipientCollectionPath(recipientId, 'reminders')).doc(reminderDocId(record.key));
+  try {
+    await ref.create({ ...record, recipientId, claimedAt: new Date().toISOString() });
+    return true;
+  } catch (error) {
+    if (error?.code === 6 || error?.code === 'already-exists') return false;
+    throw error;
+  }
+}
+
+export async function releaseReminder(user, key) {
+  if (!key) return;
+  if (!useFirestore) {
+    const state = memoryState();
+    state.reminders = (state.reminders || []).filter((item) => item.key !== key);
+    return;
+  }
+  const db = getAdminDb();
+  const recipientId = getRecipientId(user);
+  if (!recipientId) return;
+  await db.collection(recipientCollectionPath(recipientId, 'reminders')).doc(reminderDocId(key)).delete();
 }
 
 export function persistenceMode() { return useFirestore ? 'firestore' : 'demo-memory'; }

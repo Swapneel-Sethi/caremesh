@@ -13,6 +13,15 @@ import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdat
 const DEMO_RECIPIENT_ID = 'demo-recipient';
 import { firebaseLogin } from './src/firebase-login.mjs';
 import { resolveSessionUser } from './src/identity.mjs';
+import {
+  isVoiceReady,
+  startVoiceCheckIn,
+  simulateVoiceCheckIn,
+  twimlStart,
+  twimlResponse,
+  handleVoiceStatus,
+  getSessionForUser
+} from './src/voice.mjs';
 
 const publicDir = path.resolve('public');
 const limiter = new Map();
@@ -58,6 +67,59 @@ async function readObject(req) {
   const input = await body(req);
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Request body must be a JSON object');
   return input;
+}
+
+async function readRawBody(req, limit = 100_000) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new Error('Payload too large');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+let twilioModulePromise = null;
+function loadTwilioModule() {
+  if (!twilioModulePromise) {
+    twilioModulePromise = import('twilio').then((mod) => mod.default || mod).catch(() => null);
+  }
+  return twilioModulePromise;
+}
+
+// Twilio signs the exact externally visible URL it requested. On Vercel the
+// public host differs from the internal one, so forwarded headers come first
+// and the configured public origin is only a fallback.
+function externalUrl(req) {
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const host = forwardedHost || String(req.headers.host || '').trim();
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const proto = forwardedProto || (config.nodeEnv === 'production' ? 'https' : 'http');
+  const origin = host ? `${proto}://${host}` : (config.voicePublicOrigin || config.appOrigin);
+  return `${origin.replace(/\/$/, '')}${req.url || '/'}`;
+}
+
+async function verifyTwilioRequest(req, params) {
+  const signature = req.headers['x-twilio-signature'];
+  if (!signature || typeof signature !== 'string') return false;
+  if (!config.twilioAuthToken) return false;
+  const twilio = await loadTwilioModule();
+  if (!twilio || typeof twilio.validateRequest !== 'function') return false;
+  try {
+    return twilio.validateRequest(config.twilioAuthToken, signature, externalUrl(req), params) === true;
+  } catch {
+    return false;
+  }
+}
+
+function sendTwiml(res, xml) {
+  res.writeHead(200, {
+    'Content-Type': 'text/xml; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff'
+  });
+  res.end(xml);
 }
 
 function clientIp(req) {
@@ -115,8 +177,34 @@ async function api(req, res, url, deps = {}) {
       ai: config.googleProject ? 'vertex-ai' : 'deterministic-fallback',
       email: config.resendApiKey ? 'resend' : 'preview-outbox',
       cron: config.cronSecret ? 'configured' : 'unconfigured',
-      reminders: config.careTeamAlertEmails.length ? 'configured' : 'unconfigured'
+      reminders: config.careTeamAlertEmails.length ? 'configured' : 'unconfigured',
+      voice: isVoiceReady() ? 'configured' : 'unconfigured'
     });
+  }
+
+  // Twilio voice webhooks. These are called by Twilio, not by a browser, so
+  // they authenticate with the official request-validation helper plus an
+  // opaque, expiring session id. No recipient or medication ids appear here.
+  if (route === '/api/voice/twiml/start' || route === '/api/voice/twiml/response' || route === '/api/voice/status') {
+    if (method !== 'POST') return bad(res, 'Method not allowed', 405);
+    let params;
+    try {
+      params = Object.fromEntries(new URLSearchParams(await readRawBody(req)));
+    } catch {
+      return bad(res, 'Invalid request body', 400);
+    }
+    if (!(await verifyTwilioRequest(req, params))) return bad(res, 'Invalid Twilio signature', 403);
+    const sessionId = String(url.searchParams.get('session') || '');
+    if (!sessionId) return bad(res, 'Voice session is required', 400);
+
+    if (route === '/api/voice/twiml/start') {
+      return sendTwiml(res, await twimlStart(sessionId));
+    }
+    if (route === '/api/voice/twiml/response') {
+      return sendTwiml(res, await twimlResponse(sessionId, { speech: params.SpeechResult, digits: params.Digits }));
+    }
+    await handleVoiceStatus({ sessionId, callStatus: params.CallStatus });
+    return sendTwiml(res, '<?xml version="1.0" encoding="UTF-8"?><Response/>');
   }
 
   if ((method === 'GET' || method === 'POST') && route === '/api/cron/reminders') {
@@ -237,6 +325,67 @@ async function api(req, res, url, deps = {}) {
 
   if (!canViewRecipient(user)) return bad(res, 'No recipient access', 403);
   if (!(await checkRecipientAccess(user, recipientId))) return bad(res, 'No access to this care recipient', 403);
+
+  if (method === 'GET' && route === '/api/voice') {
+    return json(res, 200, {
+      ready: isVoiceReady(),
+      provider: isVoiceReady() ? 'twilio' : 'simulator',
+      maxAttempts: config.voiceMaxAttempts,
+      autoEscalate: config.voiceAutoEscalate
+    });
+  }
+
+  if (method === 'POST' && route === '/api/voice/check-in') {
+    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    // Triggering an outbound call is a caregiver action. Elders confirm doses
+    // and family members are read-only; neither should place calls.
+    if (user.role !== 'caregiver') return bad(res, 'Only a caregiver can start a voice check-in', 403);
+    let input;
+    try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
+    const { medicationId, mode } = input;
+    if (!medicationId || typeof medicationId !== 'string') return bad(res, 'Medication ID is required', 400);
+    try {
+      const result = await startVoiceCheckIn({ user, medicationId, mode: mode === 'prepare' ? 'prepare' : 'call' });
+      if (result.status === 'not_found') return bad(res, 'Medication not found', 404);
+      return json(res, 200, result);
+    } catch (error) {
+      console.error('voice_check_in_failed', { reason: 'exception' });
+      return bad(res, 'Voice check-in is temporarily unavailable', 503);
+    }
+  }
+
+  if (method === 'POST' && route === '/api/voice/demo') {
+    if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);
+    let input;
+    try { input = await readObject(req); } catch (error) { return bad(res, error.message, 400); }
+    const { medicationId, response, sessionId } = input;
+    if (!medicationId || typeof medicationId !== 'string') return bad(res, 'Medication ID is required', 400);
+    if (!['taken', 'not-taken', 'help', 'unclear', 'no-answer'].includes(response)) return bad(res, 'Unsupported simulator response', 400);
+    try {
+      const result = await simulateVoiceCheckIn({
+        user,
+        medicationId,
+        response,
+        sessionId: typeof sessionId === 'string' && sessionId.length <= 120 ? sessionId : null
+      });
+      if (result.status === 'forbidden') return bad(res, 'Voice session access denied', 403);
+      if (result.status === 'not_found') return bad(res, 'Medication not found', 404);
+      if (result.status === 'expired') return bad(res, 'Voice session expired', 409);
+      if (result.status === 'error') return bad(res, 'Voice simulation failed', 400);
+      return json(res, 200, result);
+    } catch (error) {
+      console.error('voice_simulation_failed', { reason: 'exception' });
+      return bad(res, 'Voice simulation is temporarily unavailable', 503);
+    }
+  }
+
+  const voiceStatusMatch = route.match(/^\/api\/voice\/status\/([^/]+)$/);
+  if (method === 'GET' && voiceStatusMatch) {
+    if (!canViewRecipient(user)) return bad(res, 'No recipient access', 403);
+    const session = await getSessionForUser(user, voiceStatusMatch[1]);
+    if (!session) return bad(res, 'Voice session not found', 404);
+    return json(res, 200, { session });
+  }
 
   if (method === 'POST' && route === '/api/medications') {
     if (!canMutateRecipient(user)) return bad(res, 'This role is read-only for the requested action', 403);

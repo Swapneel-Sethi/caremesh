@@ -19,7 +19,7 @@ async function providerStatus(providerId) {
   }
 }
 
-export async function sendReminder({ to, subject, text, kind = 'reminder', key = null }) {
+export async function sendReminder({ to, subject, text, kind = 'reminder', key = null, user = null }) {
   const recipients = (Array.isArray(to) ? to : [to]).map((item) => String(item || '').trim()).filter(Boolean);
   const record = {
     id: crypto.randomUUID(),
@@ -30,15 +30,17 @@ export async function sendReminder({ to, subject, text, kind = 'reminder', key =
     recipientCount: recipients.length,
     sentAt: new Date().toISOString()
   };
+  // Keep the outbox scoped to the care recipient when the caller knows it.
+  const save = () => (user ? persistOutbox(user, record) : persistOutbox(record));
 
   if (!config.resendApiKey) {
-    await persistOutbox(record);
+    await save();
     return { delivered: false, mode: 'preview', status: 'preview' };
   }
 
   if (!recipients.length) {
     record.status = 'unconfigured';
-    await persistOutbox(record);
+    await save();
     return { delivered: false, mode: 'unconfigured', status: 'unconfigured' };
   }
 
@@ -58,19 +60,19 @@ export async function sendReminder({ to, subject, text, kind = 'reminder', key =
       record.status = 'failed';
       record.providerStatus = String(response.status);
       record.error = name;
-      await persistOutbox(record);
+      await save();
       return { delivered: false, mode: 'resend', status: 'failed', providerStatus: response.status, error: name };
     }
 
     const body = await response.json().catch(() => ({}));
     record.status = 'sent';
     record.providerStatus = body.id ? await providerStatus(body.id) : 'accepted';
-    await persistOutbox(record);
+    await save();
     return { delivered: true, mode: 'resend', status: 'sent', providerStatus: record.providerStatus };
   } catch {
     record.status = 'failed';
     record.error = 'network_error';
-    await persistOutbox(record);
+    await save();
     return { delivered: false, mode: 'resend', status: 'failed', error: 'network_error' };
   }
 }

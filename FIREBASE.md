@@ -97,6 +97,9 @@ careRecipients/{recipientId}
   reminders/{reminderId}
   outbox/{messageId}
   invitations/{invitationId}
+  voiceCalls/{callId}        # completed voice check-in attempts
+
+voiceSessions/{sessionId}    # server-only, opaque, expiring
 ```
 
 ### `users/{uid}`
@@ -110,6 +113,16 @@ document.
 `displayName`, `preferredName`, `timezone`, `status`, `ownerUid`, `createdAt`,
 `updatedAt`. `ownerUid` is the explicit owner account. Ownership is data, not a
 client-supplied claim.
+
+Voice consent lives on the same document and is opt-in:
+
+- `allowVoiceCalls` — must be `true` before any outbound call.
+- `voicePhone` — E.164 number, server-only.
+- `voiceLanguage` — optional TwiML language, defaults to `CARE_VOICE_LANGUAGE`.
+- `voiceCallWindow` — optional `HH:MM-HH:MM` local window.
+
+The seeded demo recipient deliberately has `allowVoiceCalls: false` and no phone;
+the judge simulator does not call anyone.
 
 ### `careRecipients/{recipientId}/careTeam/{memberId}`
 
@@ -125,6 +138,17 @@ authorization record the backend checks on every request.
   and bounded metadata.
 - `reminders`: reminder `key`, channel, due time, delivery status, and dedupe fields.
 - `outbox`: queued/sent messages with provider id, status, timestamps, and error state.
+- `voiceCalls`: `sessionId`, `callSid`, `provider` (`twilio` | `simulator`), `attempt`,
+  `outcome`, `reason`, timestamps. No phone numbers are stored here.
+
+### `voiceSessions/{sessionId}`
+
+Top-level because inbound Twilio webhooks only know an opaque session id, not which
+recipient it belongs to. Fields: `recipientId`, `medicationId`, `medicationName`,
+`medicationSchedule`, `status`, `attempt`, `callSid`, `language`, `toMasked`,
+`createdAt`, `expiresAt`. The session id is 24 random bytes; sessions expire after
+12 minutes and are claimed transactionally (`active → processing`) so replays cannot
+mutate state twice. Clients have no read or write access.
 
 Every read and write is scoped by `recipientId` and authorized server-side against
 `ownerUid` / `careTeam`. A `recipientId` supplied by the browser is treated as a request

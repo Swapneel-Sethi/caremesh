@@ -7,6 +7,7 @@ const toastRegion = document.querySelector('#toast-region');
 let selectedRole = 'elder';
 let dashboard = null;
 let activeView = 'overview';
+let voiceReady = false;
 
 const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
@@ -423,11 +424,19 @@ function medicationSummaryCard(medications, taken) {
 function medicationRow(medication, editable) {
   const state = medicationState(medication);
   const canAct = editable && medication.status !== 'taken';
+  const canVoice = editable && dashboard?.user?.role === 'caregiver' && medication.status !== 'taken';
   return `<li class="med-item">
     <div>
       <h3>${escapeHtml(medication.name)}</h3>
       <p class="row-meta"><strong>${escapeHtml(formatTime(medication.schedule))} · Today</strong> · ${escapeHtml(medication.frequency)}</p>
       <p class="row-note">${escapeHtml(medication.instructions)}</p>
+      ${canVoice ? `<div class="voice-checkin">
+        <p class="voice-label"><strong>CarePulse</strong> · AI voice check-in ${voiceReady ? 'available' : 'available in demo mode'}</p>
+        <div class="voice-actions">
+          ${voiceReady ? `<button class="button button-secondary" type="button" data-voice-checkin="${medication.id}">AI voice check-in</button>` : ''}
+          <button class="button button-secondary" type="button" data-voice-sim="${medication.id}">Simulate AI call</button>
+        </div>
+      </div>` : ''}
     </div>
     <div class="row-side">
       <span class="chip ${chipClass(state.tone)}"><span aria-hidden="true">${state.glyph}</span> ${escapeHtml(state.label)}</span>
@@ -723,6 +732,34 @@ function bindInteractions() {
     }
   }));
 
+  document.querySelectorAll('[data-voice-checkin]').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Calling…';
+    try {
+      const result = await api('/api/voice/check-in', {
+        method: 'POST',
+        body: JSON.stringify({ medicationId: button.dataset.voiceCheckin, mode: 'auto' })
+      });
+      if (result.status === 'queued') {
+        toast('AI voice check-in calling the elder…');
+        await loadDashboard();
+      } else {
+        button.disabled = false;
+        button.textContent = 'AI voice check-in';
+        toast(result.message || 'Voice calling is not configured for this elder.', true);
+      }
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'AI voice check-in';
+      toast(friendlyError(error.message), true);
+    }
+  }));
+
+  document.querySelectorAll('[data-voice-sim]').forEach((button) => button.addEventListener('click', () => {
+    const medication = dashboard?.medications?.find((item) => item.id === button.dataset.voiceSim);
+    if (medication) openVoiceSimulator(medication);
+  }));
+
   document.querySelector('#add-med-btn')?.addEventListener('click', () => modal('Add medication', `
     <form id="med-form" class="form-grid">
       <div class="field full"><label for="med-name">Medication name and dose</label><input id="med-name" name="name" class="input" required placeholder="e.g. Vitamin D3 1000 IU" /></div>
@@ -839,7 +876,7 @@ function modal(title, body) {
 
   const form = wrapper.querySelector('form');
   wrapper.querySelector('.modal-body input, .modal-body textarea, .modal-body select, [data-close]')?.focus();
-  if (!form) return;
+  if (!form) return wrapper;
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -863,6 +900,61 @@ function modal(title, body) {
       errorNode.focus();
     }
   });
+
+  return wrapper;
+}
+
+function voiceOutcomeMessage(result) {
+  if (result.outcome === 'taken') return 'Medication confirmed by AI voice check-in. No caregiver escalation needed.';
+  if (result.outcome === 'no_answer') return 'AI voice call could not complete. Caregiver notified.';
+  if (result.outcome === 'help_requested') return 'Elder requested help. Caregiver notified.';
+  if (result.outcome === 'unclear') return 'Response unclear after two attempts. Caregiver notified.';
+  return 'Elder reported the dose was not taken. Caregiver notified.';
+}
+
+function openVoiceSimulator(medication) {
+  const wrapper = modal('AI Voice Check-In', `
+    <p class="eyebrow">CarePulse voice agent · simulator</p>
+    <p class="lead">${escapeHtml(medication.name)} · ${escapeHtml(formatTime(medication.schedule))}</p>
+    <p class="helper">Choose how the elder responds. This runs the same care workflow as a real call, so the demo never depends on telephony.</p>
+    <div class="button-row" role="group" aria-label="Simulated elder response">
+      <button class="button button-primary" type="button" data-sim="taken">✓ I took it</button>
+      <button class="button button-secondary" type="button" data-sim="not-taken">✕ I did not take it</button>
+      <button class="button button-secondary" type="button" data-sim="help">! I need help</button>
+      <button class="button button-secondary" type="button" data-sim="unclear">? Unclear / no response</button>
+    </div>
+    <p class="voice-state" role="status" aria-live="polite" hidden></p>
+  `);
+  if (!wrapper) return;
+
+  let sessionId = null;
+  const status = wrapper.querySelector('.voice-state');
+  const buttons = [...wrapper.querySelectorAll('[data-sim]')];
+
+  buttons.forEach((button) => button.addEventListener('click', async () => {
+    buttons.forEach((item) => { item.disabled = true; });
+    status.hidden = true;
+    try {
+      const result = await api('/api/voice/demo', {
+        method: 'POST',
+        body: JSON.stringify({ medicationId: medication.id, response: button.dataset.sim, sessionId })
+      });
+      if (result.status === 'retry') {
+        sessionId = result.sessionId;
+        status.textContent = 'No clear answer. The agent asks once more — choose the elder’s response again.';
+        status.hidden = false;
+        buttons.forEach((item) => { item.disabled = false; });
+        return;
+      }
+      toast(voiceOutcomeMessage(result));
+      wrapper.querySelector('[data-close]')?.click();
+      await loadDashboard();
+    } catch (error) {
+      buttons.forEach((item) => { item.disabled = false; });
+      status.textContent = friendlyError(error.message);
+      status.hidden = false;
+    }
+  }));
 }
 
 function toast(message, error = false) {
@@ -1030,7 +1122,12 @@ function renderLogin() {
 async function loadDashboard() {
   main.setAttribute('aria-busy', 'true');
   try {
-    dashboard = await api('/api/dashboard');
+    const [dashboardResult, voiceResult] = await Promise.all([
+      api('/api/dashboard'),
+      api('/api/voice').catch(() => null)
+    ]);
+    dashboard = dashboardResult;
+    voiceReady = Boolean(voiceResult?.ready);
     if (dashboard?.pending) return renderPending(dashboard.user);
     renderDashboard(activeView);
   } catch (error) {
