@@ -194,6 +194,60 @@ The current repository implements:
 
 Live phone calling is disabled by default. It requires Twilio credentials, a compatible caller ID, explicit recipient consent, an allowed calling window, and publicly reachable webhooks. The implementation and signed webhook paths are tested with synthetic provider data. This repository does not claim that a real recipient call has been completed.
 
+## CodeDia / Adaption integration
+
+Adaption is integrated as a runtime decision layer for CarePulse escalation, not as a replacement text summarizer.
+
+```mermaid
+flowchart TD
+    A[Missed medication detected] --> B[Sanitized escalation context]
+    B --> C[Adaption Responses API]
+    C --> D[submit_decision function call]
+    D --> E[CareMesh validation and safety gate]
+    E --> F{Allowed action}
+    F -->|voice_check_in| G[Existing voice check-in]
+    F -->|email_caregiver| H[Existing caregiver email]
+    F -->|hold_and_retry| I[Existing retry scheduling]
+    E -->|invalid or unavailable| J[Deterministic fallback]
+    J --> G
+    J --> H
+```
+
+- Uses the Adaption Responses API with request scoped function calling.
+- The model recommends one of three fixed operational actions: `voice_check_in`, `email_caregiver`, or `hold_and_retry`.
+- CareMesh validates the action, reason code, and confidence, then executes the existing voice, email, or retry path. The model never sends a call or email and never mutates care state.
+- Deterministic fallback preserves operation when Adaption is disabled, unconfigured, slow, unreachable, or returns malformed output.
+- No personal identifiers, contact details, notes, or dosage text are sent to Adaption. Only operational fields such as schedule, lateness, attempt count, time of day, and caregiver availability are included.
+- `ADAPTION_API_KEY` is server-side only and is never exposed to the browser.
+- The Care Brief provider adapter can use Adaption only when `ADAPTION_CARE_BRIEF_ENABLED=true`; Gemini remains the default.
+- The live verification in this repository used `gemma-4-31b-it` through the Adaption Responses API and returned a real `submit_decision` function call.
+
+This integration does not use a trained custom model, a stack, Adaptive Data, or AutoScientist.
+
+### Adaption configuration
+
+All Adaption values are server-side environment variables. Never put the key in the browser, a source file, or a commit.
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `ADAPTION_ENABLED` | Enables the CarePulse advisor | `false` |
+| `ADAPTION_API_KEY` | Bearer token for Adaption | empty |
+| `ADAPTION_BASE_URL` | Responses API base URL | `https://api.prod.adaptionlabs.ai/api/v1` |
+| `ADAPTION_MODEL` | Model used for the decision | `gemma-4-31b-it` |
+| `ADAPTION_TIMEOUT_MS` | Per-request timeout | `8000` |
+| `ADAPTION_MAX_OUTPUT_TOKENS` | Response size cap | `400` |
+| `ADAPTION_CARE_BRIEF_ENABLED` | Opt in to Adaption for Care Brief | `false` |
+
+### Reproducing the CarePulse decision
+
+1. Sign in as **Caregiver** with access code `2468`.
+2. Open **Medications** and add a medication scheduled at least 30 minutes in the past, or use an existing overdue dose.
+3. Select **Send reminders**.
+4. CarePulse builds the allowlisted context, calls Adaption, validates the returned `submit_decision` call, applies the safety gate, and records the outcome.
+5. Open **Continuity**, **Medications**, or **Timeline** to see the action, reason, confidence, and source. If Adaption is disabled, unconfigured, or unavailable, the same flow records the deterministic fallback instead.
+
+A `hold_and_retry` recommendation is accepted only for a recent miss with fewer than two prior attempts; otherwise the server overrides it and escalates.
+
 ## Why this matters at scale
 
 A caregiver may eventually coordinate care for several elders:
@@ -357,7 +411,7 @@ This is an accessibility conscious implementation, not a claim of formal certifi
 
 ## Engineering quality
 
-**77 automated tests passing.** The suite uses Node's built in test runner and covers:
+**103 automated tests passing.** The suite uses Node's built in test runner and covers:
 
 - medication and appointment validation
 - scrypt passcode verification and signed session tamper rejection
@@ -375,6 +429,9 @@ This is an accessibility conscious implementation, not a claim of formal certifi
 - duplicate missed dose claims
 - operation without Twilio, Resend, or Vertex AI credentials
 - secret and phone number non disclosure
+- Adaption request shape, bearer auth, timeout, HTTP failure, malformed response, and network failure
+- CarePulse decision allowlists, confidence bounds, sanitizer caps, hold safety gate, and deterministic fallback
+- reminder run to Adaption decision to audit event integration
 
 Verification commands:
 
@@ -455,7 +512,7 @@ CareMesh already separates many cross cutting concerns from the care domain, mak
 | Backend | Node.js with the built in HTTP server |
 | Authentication | Firebase Authentication, Firebase Admin token verification, signed CareMesh sessions |
 | Database | Firestore through Firebase Admin, with a memory fallback for local demos |
-| AI | Vertex AI and Gemini adapter with deterministic Care Brief fallback |
+| AI | Adaption Responses API for CarePulse escalation, Vertex AI and Gemini for Care Brief, deterministic fallbacks |
 | Automation | CarePulse reminder engine and protected Vercel cron routes |
 | Email | Resend with preview outbox fallback |
 | Voice | Twilio integration, TwiML, deterministic intent classifier, and simulator |

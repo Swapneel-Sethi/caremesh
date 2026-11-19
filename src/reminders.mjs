@@ -3,6 +3,7 @@ import { domainSnapshot, persistEvent, persistReminder, checkReminderExists, cla
 import { sendReminder } from './email.mjs';
 import { clockLabel, dateLong, dayOffset, localParts, scheduleLabel, timeToMinutes } from './time.mjs';
 import { isVoiceReady, startAutomatedVoiceCheckIn } from './voice.mjs';
+import { decideCarePulseEscalation, deterministicDecision, enforceDecisionSafety } from './carepulse-advisor.mjs';
 
 function getUserSnapshot(snapshot, user) {
   return { ...snapshot, _user: user };
@@ -142,6 +143,65 @@ function eventTitle(kind, status) {
   return 'Appointment reminder sent';
 }
 
+const DECISION_ACTION_LABELS = {
+  voice_check_in: 'Voice check-in',
+  email_caregiver: 'Caregiver email',
+  hold_and_retry: 'Hold and retry'
+};
+
+const DECISION_REASON_LABELS = {
+  recent_miss_low_urgency: 'Recent miss, low urgency',
+  repeated_miss: 'Repeated miss',
+  caregiver_followup_needed: 'Caregiver follow-up needed',
+  voice_check_in_preferred: 'Voice check-in preferred',
+  temporary_retry: 'Temporary retry',
+  insufficient_context: 'Insufficient context'
+};
+
+function timeOfDay(minutes) {
+  if (minutes < 6 * 60) return 'night';
+  if (minutes < 12 * 60) return 'morning';
+  if (minutes < 17 * 60) return 'afternoon';
+  if (minutes < 21 * 60) return 'evening';
+  return 'night';
+}
+
+function buildCarePulseContext(state, candidate, now) {
+  const local = localParts(now, config.reminderTimeZone);
+  const scheduledMinutes = timeToMinutes(candidate.summary.scheduledTime);
+  const related = (state.reminders || [])
+    .filter((record) => typeof record.key === 'string' &&
+      record.key.startsWith('medication-missed:') &&
+      record.key.endsWith(`:${candidate.summary.medicationId}`))
+    .map((record) => String(record.status || 'unknown'))
+    .filter(Boolean);
+
+  return {
+    medicationStatus: 'missed',
+    scheduledTime: candidate.summary.scheduledTime,
+    currentTime: clockLabel(now, config.reminderTimeZone),
+    minutesLate: Math.max(0, local.minutes - scheduledMinutes),
+    recentReminderAttempts: related.length,
+    previousReminderOutcomes: related.slice(0, 5),
+    timeOfDay: timeOfDay(local.minutes),
+    caregiverAvailability: (state.careTeam || []).length ? 'available' : 'unknown',
+    priorEscalationOutcome: related[0] || 'none',
+    voiceReady: isVoiceReady()
+  };
+}
+
+function decisionTitle(decision) {
+  const label = DECISION_ACTION_LABELS[decision.action] || 'Escalation';
+  return decision.source === 'adaption'
+    ? `CarePulse AI decision · ${label}`
+    : `CarePulse safe fallback · ${label}`;
+}
+
+function decisionDetail(decision) {
+  const reason = DECISION_REASON_LABELS[decision.reasonCode] || 'Operational decision';
+  return `${reason} · ${Math.round(Number(decision.confidence) * 100)}% confidence`;
+}
+
 export async function previewReminders({ now = new Date(), snapshot, user } = {}) {
   const state = snapshot || await domainSnapshot(user);
   return Promise.all(buildReminderCandidates(state, now).map(async (candidate) => {
@@ -154,7 +214,7 @@ export async function previewReminders({ now = new Date(), snapshot, user } = {}
   }));
 }
 
-export async function runReminders({ actor = 'CarePulse', now = new Date(), snapshot, user } = {}) {
+export async function runReminders({ actor = 'CarePulse', now = new Date(), snapshot, user, decisionProvider = decideCarePulseEscalation } = {}) {
   const state = snapshot || await domainSnapshot(user);
   const results = [];
 
@@ -165,11 +225,45 @@ export async function runReminders({ actor = 'CarePulse', now = new Date(), snap
       continue;
     }
 
-    // AI voice first, human when necessary. A missed dose is handled by a
-    // voice check-in when voice calling is configured; the caregiver email is
-    // only sent after the check-in fails or cannot be started. The claim uses
+    let decision = null;
+    if (candidate.kind === 'medication-missed') {
+      const context = buildCarePulseContext(state, candidate, now);
+      let recommended;
+      try {
+        recommended = await decisionProvider(context);
+      } catch {
+        recommended = deterministicDecision(context);
+      }
+      decision = enforceDecisionSafety(recommended, context);
+      await persistEvent(user, {
+        at: clockLabel(now, config.reminderTimeZone),
+        title: decisionTitle(decision),
+        actor,
+        type: 'carepulse_adaption_decision',
+        detail: decisionDetail(decision),
+        source: decision.source,
+        action: decision.action,
+        reasonCode: decision.reasonCode,
+        confidence: decision.confidence
+      });
+      if (decision.action === 'hold_and_retry') {
+        results.push({
+          ...candidate.summary,
+          status: 'deferred',
+          delivered: false,
+          decisionSource: decision.source,
+          action: decision.action,
+          reasonCode: decision.reasonCode
+        });
+        continue;
+      }
+    }
+
+    // AI voice first when the advisor selects it. A missed dose still falls
+    // through to the caregiver email when a call cannot start, so a model or
+    // provider failure never suppresses the final escalation. The claim uses
     // the existing reminder key so concurrent cron runs cannot both call.
-    if (candidate.kind === 'medication-missed' && isVoiceReady()) {
+    if (candidate.kind === 'medication-missed' && isVoiceReady() && decision?.action === 'voice_check_in') {
       const claimed = await claimReminder(user, {
         key: candidate.key,
         kind: 'voice-check-in',
@@ -182,7 +276,15 @@ export async function runReminders({ actor = 'CarePulse', now = new Date(), snap
       }
       const voice = await startAutomatedVoiceCheckIn({ user, medicationId: candidate.summary.medicationId });
       if (voice.status === 'queued') {
-        results.push({ ...candidate.summary, status: 'voice-check-in', delivered: false, sessionId: voice.sessionId });
+        results.push({
+          ...candidate.summary,
+          status: 'voice-check-in',
+          delivered: false,
+          sessionId: voice.sessionId,
+          decisionSource: decision.source,
+          action: decision.action,
+          reasonCode: decision.reasonCode
+        });
         continue;
       }
       // The provider could not start a call. CareMesh must still alert the care
@@ -218,7 +320,11 @@ export async function runReminders({ actor = 'CarePulse', now = new Date(), snap
       detail: candidate.detail
     });
 
-    results.push({ ...candidate.summary, ...delivery });
+    results.push({
+      ...candidate.summary,
+      ...delivery,
+      ...(decision ? { decisionSource: decision.source, action: decision.action, reasonCode: decision.reasonCode } : {})
+    });
   }
 
   return { results, checkedAt: now.toISOString(), timeZone: config.reminderTimeZone };

@@ -25,5 +25,11 @@ export const config = Object.freeze({
   voicePublicOrigin: process.env.CARE_VOICE_PUBLIC_ORIGIN || '',
   voiceLanguage: process.env.CARE_VOICE_LANGUAGE || 'en-IN',
   voiceMaxAttempts: Math.min(3, Math.max(1, Number(process.env.CARE_VOICE_MAX_ATTEMPTS) || 2)),
-  voiceAutoEscalate: process.env.CARE_VOICE_AUTO_ESCALATE !== 'false'
+  voiceAutoEscalate: process.env.CARE_VOICE_AUTO_ESCALATE !== 'false',
+  adaptionEnabled: process.env.ADAPTION_ENABLED === 'true',
+  adaptionCareBriefEnabled: process.env.ADAPTION_CARE_BRIEF_ENABLED === 'true',
+  adaptionBaseUrl: process.env.ADAPTION_BASE_URL || 'https://api.prod.adaptionlabs.ai/api/v1',
+  adaptionModel: process.env.ADAPTION_MODEL || 'gemma-4-31b-it',
+  adaptionTimeoutMs: Math.max(1000, Number(process.env.ADAPTION_TIMEOUT_MS) || 8000),
+  adaptionMaxOutputTokens: Math.max(64, Number(process.env.ADAPTION_MAX_OUTPUT_TOKENS) || 400)
 });

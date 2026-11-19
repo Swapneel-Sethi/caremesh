@@ -7,9 +7,9 @@ import { config } from './src/config.mjs';
 import { getUsers, getUserById } from './src/data.mjs';
 import { createSession, readSession, verifyPasscode } from './src/security.mjs';
 import { validateMedication, validateAppointment } from './src/validation.mjs';
-import { generateCareBrief } from './src/google.mjs';
+import { generateCareBrief } from './src/care-brief-adapter.mjs';
 import { previewReminders, runReminders } from './src/reminders.mjs';
-import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdate, persistAppointment, persistenceMode, createInvitation, getInvitation, getInvitationsByRecipient, acceptInvitation, revokeInvitation, checkRecipientAccess, addCareTeamMember, removeCareTeamMember, getCareTeamMembers, canViewRecipient, canMutateRecipient, isPending, getUserRecipientId } from './src/store.mjs';
+import { domainSnapshot, persistEvent, persistMedication, persistMedicationUpdate, persistAppointment, persistenceMode, createInvitation, getInvitationsByRecipient, acceptInvitation, revokeInvitation, checkRecipientAccess, canViewRecipient, canMutateRecipient, isPending, getUserRecipientId } from './src/store.mjs';
 const DEMO_RECIPIENT_ID = 'demo-recipient';
 import { firebaseLogin } from './src/firebase-login.mjs';
 import { resolveSessionUser } from './src/identity.mjs';
@@ -178,7 +178,8 @@ async function api(req, res, url, deps = {}) {
       email: config.resendApiKey ? 'resend' : 'preview-outbox',
       cron: config.cronSecret ? 'configured' : 'unconfigured',
       reminders: config.careTeamAlertEmails.length ? 'configured' : 'unconfigured',
-      voice: isVoiceReady() ? 'configured' : 'unconfigured'
+      voice: isVoiceReady() ? 'configured' : 'unconfigured',
+      adaption: { enabled: config.adaptionEnabled, model: config.adaptionModel }
     });
   }
 
@@ -291,10 +292,10 @@ async function api(req, res, url, deps = {}) {
       state = await domainSnapshot(user);
     } catch (error) {
       console.error('dashboard domainSnapshot error:', error);
-      return json(res, 500, { error: 'Dashboard snapshot failed', detail: error.message });
+      return json(res, 500, { error: 'Dashboard snapshot failed' });
     }
     let careBrief = 'Care Brief unavailable.';
-    try { careBrief = await generateCareBrief({ profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam }); } catch (error) { careBrief = `Care Brief fallback\n\n${error.message}`; }
+    try { careBrief = await generateCareBrief({ profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam }); } catch { careBrief = 'Care Brief is temporarily unavailable.'; }
     return json(res, 200, { user: sanitizeUser(user), profile: state.profiles[0], medications: state.medications, appointments: state.appointments, careTeam: state.careTeam, events: state.events, outbox: safeOutbox(state.outbox), careBrief });
   }
 
@@ -486,7 +487,7 @@ async function staticFile(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === '/') pathname = '/index.html';
   const filePath = path.normalize(path.join(publicDir, pathname));
-  if (!filePath.startsWith(publicDir)) return bad(res, 'Forbidden', 403);
+  if (filePath !== publicDir && !filePath.startsWith(publicDir + path.sep)) return bad(res, 'Forbidden', 403);
   try {
     const info = await stat(filePath);
     if (!info.isFile()) return bad(res, 'Not found', 404);

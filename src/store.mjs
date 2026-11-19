@@ -222,15 +222,6 @@ export async function persistOutbox(userOrMessage, maybeMessage) {
   return message;
 }
 
-export async function reminderKeys(user) {
-  if (!useFirestore) return new Set((memoryState().reminders || []).map((record) => record.key));
-  const db = getAdminDb();
-  const recipientId = getRecipientId(user);
-  if (!recipientId) return new Set();
-  const collectionPath = recipientCollectionPath(recipientId, 'reminders');
-  return new Set();
-}
-
 export async function checkReminderExists(user, key) {
   if (!useFirestore) {
     return (memoryState().reminders || []).some((record) => record.key === key);

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReminderCandidates } from '../src/reminders.mjs';
+import { buildReminderCandidates, runReminders } from '../src/reminders.mjs';
+import { getState } from '../src/data.mjs';
 
 const profile = { name: 'Meera Rao', age: 72 };
 const now = new Date('2026-11-15T13:20:00+05:30');
@@ -48,4 +49,109 @@ test('reminder email content includes care context but no addresses or internal 
   const missed = candidates.find((item) => item.kind === 'medication-missed');
   assert.match(missed.subject, /Missed medication/);
   assert.match(missed.text, /Overdue and not recorded/);
+});
+
+function decisionSnapshot(schedule) {
+  return {
+    profiles: [profile],
+    medications: [{ id: 'med-missed', name: 'Metformin 500 mg', schedule, status: 'pending', instructions: 'Take with food.', frequency: 'Daily' }],
+    appointments: [],
+    careTeam: [{ id: 'team-1', role: 'Caregiver' }]
+  };
+}
+
+function resetReminderState() {
+  const state = getState();
+  state.events.length = 0;
+  state.outbox.length = 0;
+  state.reminders.length = 0;
+  return state;
+}
+
+test('a valid Adaption decision selects the caregiver email path and records an audit event', async () => {
+  const state = resetReminderState();
+  const result = await runReminders({
+    snapshot: decisionSnapshot('12:00'),
+    now: new Date('2026-11-15T13:20:00+05:30'),
+    decisionProvider: async () => ({
+      source: 'adaption',
+      action: 'email_caregiver',
+      reasonCode: 'repeated_miss',
+      confidence: 0.82
+    })
+  });
+
+  const missed = result.results.find((item) => item.kind === 'medication-missed');
+  assert.equal(missed.decisionSource, 'adaption');
+  assert.equal(missed.action, 'email_caregiver');
+  assert.equal(missed.reasonCode, 'repeated_miss');
+  assert.equal(state.outbox.length, 1);
+
+  const event = state.events.find((item) => item.type === 'carepulse_adaption_decision');
+  assert.ok(event);
+  assert.equal(event.source, 'adaption');
+  assert.equal(event.action, 'email_caregiver');
+  assert.equal(event.reasonCode, 'repeated_miss');
+  assert.equal(event.confidence, 0.82);
+  assert.doesNotMatch(JSON.stringify(event), /Meera|@|\+91|Metformin/);
+});
+
+test('the reminder workflow continues with a safe fallback when the advisor throws', async () => {
+  const state = resetReminderState();
+  const result = await runReminders({
+    snapshot: decisionSnapshot('12:00'),
+    now: new Date('2026-11-15T13:20:00+05:30'),
+    decisionProvider: async () => { throw new Error('adaption down'); }
+  });
+
+  const missed = result.results.find((item) => item.kind === 'medication-missed');
+  assert.equal(missed.decisionSource, 'deterministic_fallback');
+  assert.equal(missed.action, 'email_caregiver');
+  assert.equal(state.outbox.length, 1);
+
+  const event = state.events.find((item) => item.type === 'carepulse_adaption_decision');
+  assert.equal(event.source, 'deterministic_fallback');
+});
+
+test('an unsafe hold recommendation is overridden by the server safety gate', async () => {
+  const state = resetReminderState();
+  const result = await runReminders({
+    snapshot: decisionSnapshot('12:00'),
+    now: new Date('2026-11-15T13:20:00+05:30'),
+    decisionProvider: async () => ({
+      source: 'adaption',
+      action: 'hold_and_retry',
+      reasonCode: 'temporary_retry',
+      confidence: 0.9
+    })
+  });
+
+  const missed = result.results.find((item) => item.kind === 'medication-missed');
+  assert.notEqual(missed.status, 'deferred');
+  assert.equal(missed.action, 'email_caregiver');
+  assert.equal(missed.decisionSource, 'deterministic_fallback');
+  assert.equal(state.outbox.length, 1);
+});
+
+test('a hold recommendation is honoured only within the safety window', async () => {
+  const state = resetReminderState();
+  const result = await runReminders({
+    snapshot: decisionSnapshot('12:45'),
+    now: new Date('2026-11-15T13:20:00+05:30'),
+    decisionProvider: async () => ({
+      source: 'adaption',
+      action: 'hold_and_retry',
+      reasonCode: 'temporary_retry',
+      confidence: 0.7
+    })
+  });
+
+  const missed = result.results.find((item) => item.kind === 'medication-missed');
+  assert.equal(missed.status, 'deferred');
+  assert.equal(missed.action, 'hold_and_retry');
+  assert.equal(state.outbox.length, 0);
+  assert.equal(state.reminders.length, 0);
+
+  const event = state.events.find((item) => item.type === 'carepulse_adaption_decision');
+  assert.equal(event.action, 'hold_and_retry');
 });

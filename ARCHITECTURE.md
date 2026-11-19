@@ -11,9 +11,10 @@ Node HTTP application
   ├── REST style API routes
   ├── Care domain services
   ├── Google Gemini adapter
+  ├── Adaption AI CarePulse advisor
   ├── Reminder/email adapter
   └── Data repository
-       ├── Firestore REST when GOOGLE_CLOUD_PROJECT is configured
+       ├── Firestore through Firebase Admin when configured
        └── Demo store held in memory for local development
 ```
 

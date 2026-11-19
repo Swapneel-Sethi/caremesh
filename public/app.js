@@ -360,6 +360,7 @@ function overviewView() {
       </div>
       ${medicationSummaryCard(medications, taken)}
       ${careChainCard()}
+      ${escalationDecisionCard()}
       ${careCircleCard()}
       ${careBriefCard()}
       ${handoffCard()}
@@ -375,37 +376,11 @@ function continuityView() {
         <div class="card-head"><h2 id="continuity-actions-title">Open action queue</h2><span class="chip chip-neutral">Resolve in order</span></div>
         <ol class="action-list">${actionQueue()}</ol>
       </section>
+      ${escalationDecisionCard()}
       ${careChainCard()}
       ${handoffCard()}
       ${careBriefCard()}
     </div>`;
-}
-
-function focusCard(medications, editable) {
-  const pending = medications.filter((medication) => medication.status === 'pending');
-  const next = pending[0] || medications.find((medication) => medication.status === 'missed');
-  if (!next) {
-    return `<section class="card card-feature" aria-labelledby="focus-title">
-      <p class="eyebrow">Next step</p>
-      <h2 id="focus-title">Everything is on track for today.</h2>
-      <p class="lead">${medications.length ? 'All medications are confirmed. Nothing needs your attention right now.' : 'No medications are scheduled today.'}</p>
-      <div class="button-row"><button class="button button-secondary" data-view="medications">View medications</button></div>
-    </section>`;
-  }
-  const state = medicationState(next);
-  const needsAttention = state.tone === 'warn' || state.tone === 'danger';
-  return `<section class="card card-feature" aria-labelledby="focus-title">
-    <p class="eyebrow">${needsAttention ? 'Needs attention' : 'Next medication'}</p>
-    <h2 id="focus-title">${escapeHtml(next.name)}</h2>
-    <p class="focus-meta">Due ${escapeHtml(formatTime(next.schedule))} today · ${escapeHtml(next.instructions)}</p>
-    <div class="chip-row"><span class="chip ${chipClass(state.tone)}"><span aria-hidden="true">${state.glyph}</span> ${escapeHtml(state.label)}</span></div>
-    ${pending.length > 1 ? `<p class="helper">${pending.length - 1} more medication${pending.length - 1 === 1 ? '' : 's'} still to confirm today.</p>` : ''}
-    <div class="button-row">
-      ${editable ? `<button class="button button-primary button-large" data-take="${next.id}">✓ Mark as taken</button>` : ''}
-      <button class="button button-secondary" data-view="medications">View all medications</button>
-    </div>
-    ${editable ? '' : '<p class="helper">Family access is read only. The elder and caregiver confirm doses.</p>'}
-  </section>`;
 }
 
 function medicationSummaryCard(medications, taken) {
@@ -502,6 +477,65 @@ function personRow(person) {
   </li>`;
 }
 
+const ESCALATION_ACTION_LABELS = {
+  voice_check_in: 'Voice check-in',
+  email_caregiver: 'Caregiver email',
+  hold_and_retry: 'Hold and retry'
+};
+
+const ESCALATION_REASON_LABELS = {
+  recent_miss_low_urgency: 'Recent miss, low urgency',
+  repeated_miss: 'Repeated miss',
+  caregiver_followup_needed: 'Caregiver follow-up needed',
+  voice_check_in_preferred: 'Voice check-in preferred',
+  temporary_retry: 'Temporary retry',
+  insufficient_context: 'Insufficient context'
+};
+
+function latestEscalationDecision() {
+  return (dashboard.events || []).find((event) => event.type === 'carepulse_adaption_decision') || null;
+}
+
+function decisionSourceLabel(decision) {
+  return decision.source === 'adaption' ? 'Adaption AI recommendation' : 'Deterministic safety fallback';
+}
+
+function decisionSummary(decision) {
+  const action = ESCALATION_ACTION_LABELS[decision.action] || 'Escalation';
+  const reason = ESCALATION_REASON_LABELS[decision.reasonCode] || 'Operational decision';
+  const confidence = Number(decision.confidence);
+  const confidenceLabel = Number.isFinite(confidence) ? ` · ${Math.round(confidence * 100)}% confidence` : '';
+  return { action, reason, confidenceLabel };
+}
+
+function escalationDecisionCard() {
+  const decision = latestEscalationDecision();
+  if (!decision) return '';
+  const { action, reason, confidenceLabel } = decisionSummary(decision);
+  return `<section class="card" aria-labelledby="escalation-decision-title">
+    <div class="card-head"><div><h2 id="escalation-decision-title">CarePulse escalation decision</h2><span class="chip chip-neutral">${escapeHtml(decisionSourceLabel(decision))}</span></div></div>
+    <p class="lead"><strong>${escapeHtml(action)}</strong> · ${escapeHtml(reason)}${confidenceLabel}</p>
+    <p class="helper">${decision.source === 'adaption' ? 'Adaption recommended this action; CareMesh validated it against its safety policy before acting. No personal identifiers were sent.' : 'Adaption was unavailable or its output was rejected, so CareMesh applied its deterministic safety policy.'}</p>
+  </section>`;
+}
+
+function carePulseAiCard() {
+  const decision = latestEscalationDecision();
+  if (!decision) {
+    return `<section class="card" aria-labelledby="carepulse-ai-title">
+      <div class="card-head"><h2 id="carepulse-ai-title">CarePulse · AI assisted escalation</h2><span class="chip chip-neutral">Adaption AI</span></div>
+      <p class="lead">When a dose is missed, CarePulse asks Adaption AI for a structured escalation recommendation. CareMesh validates it against its safety policy before acting.</p>
+      <p class="helper">Only operational fields are sent. Names, contacts, user IDs and dosage text stay in CareMesh. If Adaption is unavailable, the deterministic policy runs instead.</p>
+    </section>`;
+  }
+  const { action, reason, confidenceLabel } = decisionSummary(decision);
+  return `<section class="card" aria-labelledby="carepulse-ai-title">
+    <div class="card-head"><div><h2 id="carepulse-ai-title">CarePulse · latest escalation</h2><span class="chip chip-neutral">${escapeHtml(decisionSourceLabel(decision))}</span></div></div>
+    <p class="lead"><strong>${escapeHtml(action)}</strong> · ${escapeHtml(reason)}${confidenceLabel}</p>
+    <p class="helper">${decision.source === 'adaption' ? 'CarePulse sent only allowlisted operational fields to Adaption. CareMesh validated the recommendation before acting.' : 'Adaption was unavailable or its output was rejected, so CareMesh used its deterministic safety policy.'}</p>
+  </section>`;
+}
+
 function careBriefCard() {
   return `<section class="card" aria-labelledby="brief-title">
     <div class="card-head"><div><h2 id="brief-title">Today’s care brief</h2><span class="chip chip-neutral">Structured summary</span></div><button class="button button-secondary" id="refresh-brief-btn" type="button">Refresh summary</button></div>
@@ -523,6 +557,7 @@ function medicationsView() {
     ${pageHead('Medications', lead)}
     <div class="stack">
       ${pulseCard(pulse)}
+      ${carePulseAiCard()}
       <section class="card" aria-labelledby="all-meds-title">
         <div class="card-head">
           <h2 id="all-meds-title">All medications</h2>
@@ -589,7 +624,7 @@ function timelineView() {
       <div class="card-head"><h2 id="timeline-title">Recent activity</h2><span class="chip chip-neutral">${dashboard.events.length} events</span></div>
       <ol class="timeline">${dashboard.events.map((event) => `<li class="timeline-item">
         <span class="timeline-time">${escapeHtml(event.at)}</span>
-        <div><h3>${escapeHtml(event.title)}</h3><p>${escapeHtml(event.actor)} · ${escapeHtml(event.detail)}</p></div>
+        <div><h3>${escapeHtml(event.title)}</h3><p>${escapeHtml(event.actor)} · ${escapeHtml(event.detail)}</p>${event.type === 'carepulse_adaption_decision' ? `<span class="chip chip-neutral">${event.source === 'adaption' ? 'Adaption decision' : 'Safe fallback'}</span>` : ''}</div>
       </li>`).join('')}</ol>
     </section>`;
 }
@@ -632,9 +667,10 @@ function judgeTourView() {
         <ol class="judge-steps">
           <li><span>1</span><div><strong>Overview</strong><p>See the current care state and the next action immediately.</p></div><button class="button button-secondary" data-view="overview" aria-label="Open Overview">Open</button></li>
           <li><span>2</span><div><strong>Continuity</strong><p>See how CareMesh turns a signal into action, record and handoff.</p></div><button class="button button-secondary" data-view="continuity" aria-label="Open Continuity">Open</button></li>
-          <li><span>3</span><div><strong>Medication + appointments</strong><p>See the concrete workflows behind the coordination layer.</p></div><div class="judge-step-actions"><button class="button button-secondary button-compact" data-view="medications" aria-label="Open Medications">Medications</button><button class="button button-secondary button-compact" data-view="appointments" aria-label="Open Appointments">Appointments</button></div></li>
-          <li><span>4</span><div><strong>Care Circle</strong><p>See who is involved and what each role can do.</p></div><button class="button button-secondary" data-view="care-team" aria-label="Open Care Circle">Open</button></li>
-          <li><span>5</span><div><strong>Timeline</strong><p>Verify that the coordination loop leaves an auditable activity trail.</p></div><button class="button button-secondary" data-view="timeline" aria-label="Open Timeline">Open</button></li>
+          <li><span>3</span><div><strong>CarePulse + Adaption</strong><p>After a missed dose, run reminders and see the Adaption recommendation, the safety gate, and the recorded action.</p></div><button class="button button-secondary" data-view="medications" aria-label="Open CarePulse in Medications">Open</button></li>
+          <li><span>4</span><div><strong>Medication + appointments</strong><p>See the concrete workflows behind the coordination layer.</p></div><div class="judge-step-actions"><button class="button button-secondary button-compact" data-view="medications" aria-label="Open Medications">Medications</button><button class="button button-secondary button-compact" data-view="appointments" aria-label="Open Appointments">Appointments</button></div></li>
+          <li><span>5</span><div><strong>Care Circle</strong><p>See who is involved and what each role can do.</p></div><button class="button button-secondary" data-view="care-team" aria-label="Open Care Circle">Open</button></li>
+          <li><span>6</span><div><strong>Timeline</strong><p>Verify that the coordination loop leaves an auditable activity trail.</p></div><button class="button button-secondary" data-view="timeline" aria-label="Open Timeline">Open</button></li>
         </ol>
       </section>
       <section class="judge-section" aria-labelledby="diff-title">
@@ -689,7 +725,7 @@ function judgeTourView() {
       </section>
       <div class="cols">
         <section class="card" aria-labelledby="rubric-title">
-          <div class="card-head"><h2 id="rubric-title">Why it scores</h2><span class="chip chip-ok">FLARE fit</span></div>
+          <div class="card-head"><h2 id="rubric-title">Why it scores</h2><span class="chip chip-ok">Hackathon fit</span></div>
           <ul class="rubric-list">
             <li><strong>Innovation</strong><span>Care continuity is the differentiator: signal → action → record → handoff.</span></li>
             <li><strong>Technical execution</strong><span>Session auth that respects each role, server side authorization, reminder engine, email adapter and audit timeline.</span></li>
@@ -702,7 +738,7 @@ function judgeTourView() {
           <div class="proof-grid">
             <div><strong>Security</strong><p>Signed session cookie + role gates + security headers.</p></div>
             <div><strong>Automation</strong><p>Deduplicated reminder workflow with protected cron support.</p></div>
-            <div><strong>AI layer</strong><p>Structured care brief with a deterministic fallback.</p></div>
+            <div><strong>AI layer</strong><p>Adaption recommends a bounded CarePulse escalation action; CareMesh validates it and keeps a deterministic fallback.</p></div>
             <div><strong>Auditability</strong><p>Medication, appointment and access actions appear in Timeline.</p></div>
             <div class="proof-resilience"><strong>Demo resilience</strong><p>Core workflows remain usable with a deterministic AI fallback and demo data stored in memory, so the product still functions when optional services are unavailable.</p></div>
           </div>
@@ -710,7 +746,7 @@ function judgeTourView() {
       </div>
       <section class="card judge-note">
         <div class="card-head"><h2>Demo tip</h2><span class="chip chip-neutral">Recommended order</span></div>
-        <p class="lead"><strong>Overview → Continuity → Care Circle → Timeline.</strong> The story should feel like one care thread rather than five disconnected screens.</p>
+        <p class="lead"><strong>Overview → Continuity → Medications → Timeline.</strong> Run CarePulse once in Medications so the Adaption decision, safety outcome, and audit event appear in the same thread.</p>
       </section>
     </div>`;
 }
@@ -826,11 +862,21 @@ function bindInteractions() {
     try {
       const result = await api('/api/reminders/run', { method: 'POST', body: '{}' });
       await loadDashboard();
+      const decided = result.results.find((item) => item.decisionSource);
       const sent = result.results.filter((item) => item.status === 'sent').length;
       const preview = result.results.filter((item) => item.status === 'preview').length;
       const failed = result.results.filter((item) => item.status === 'failed' || item.status === 'unconfigured').length;
       const duplicates = result.results.filter((item) => item.status === 'duplicate').length;
-      if (sent) toast(`${sent} reminder${sent === 1 ? '' : 's'} sent to your care circle.`);
+      if (decided) {
+        const action = ESCALATION_ACTION_LABELS[decided.action] || 'Escalation';
+        const source = decided.decisionSource === 'adaption' ? 'Adaption AI' : 'safe fallback';
+        const outcome = decided.status === 'deferred'
+          ? 'retry deferred by the safety policy'
+          : decided.status === 'voice-check-in'
+            ? 'voice check-in queued'
+            : 'caregiver email prepared';
+        toast(`CarePulse: ${action} · ${source} · ${outcome}.`);
+      } else if (sent) toast(`${sent} reminder${sent === 1 ? '' : 's'} sent to your care circle.`);
       else if (preview) toast(`${preview} reminder${preview === 1 ? '' : 's'} prepared in preview mode.`);
       else if (duplicates) toast('Those reminders were already sent. No duplicates were created.');
       else if (failed) toast('The reminder could not be sent. Please try again.', true);

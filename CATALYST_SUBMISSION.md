@@ -1,5 +1,7 @@
 # Catalyst Submission Checklist
 
+> Historical checklist from an earlier Catalyst submission. For the CodeDia 2026 submission, use `README.md` and `docs/CODEDIA-ADAPTION-PLAN.md`.
+
 ## Round 1: automatic platform code assessment
 The codebase is intentionally organized to make these signals explicit:
 
